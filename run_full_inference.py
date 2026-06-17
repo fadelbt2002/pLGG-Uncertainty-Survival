@@ -253,6 +253,7 @@ def step2_dlm1(clinical_xlsx: str, output_dir: Path):
     if str(Path(clinical_xlsx).resolve()) != str(dest.resolve()):
         shutil.copy(clinical_xlsx, dest)
 
+    output_dir = output_dir.resolve()   # must be absolute for _resolve() in inference.py
     cfg = dict(dlm1_inference.CONFIG)
     cfg.update({
         "input_dir":     str(output_dir),
