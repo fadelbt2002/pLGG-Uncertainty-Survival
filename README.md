@@ -28,6 +28,10 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 ```
 ├── run_full_inference.py           # END-TO-END: T2w NIfTI → DL-M1 → DL-M2 → treatment scenarios + 95% CI
 │
+├── example/                        # Synthetic example inputs — start here
+│   ├── Clinical_Features.xlsx      # 3 example subjects showing all valid column values
+│   └── ResNet_Features_template.xlsx  # Column layout only (zeros); real features from Step 1
+│
 ├── 01_DLM1_Clinico_ResNet/         # DL-M1: imaging + clinical Cox model
 │   ├── 1_Data_Wrangling.ipynb
 │   ├── 2_Feature_Engineering.ipynb
