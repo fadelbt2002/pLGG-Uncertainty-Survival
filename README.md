@@ -45,7 +45,8 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 │   ├── remover.pkl
 │   ├── dropper.pkl
 │   ├── LGG_inference/              # Example Clinical_Features.xlsx and ResNet_Features.xlsx
-│   └── outputs/models/             # estimator.pkl, bootstrap_models.pkl (1000 × CoxPH), risk_threshold.pkl
+│   └── outputs/models/             # estimator.pkl, bootstrap_models.pkl (1000 × CoxPH), risk_threshold.pkl,
+│                                   # refit_coxph_model.pkl (CoxPH α=0, 12 features), refit_threshold.pkl
 │
 ├── 02_Molecular_Subtype/           # Molecular-only survival model
 │   ├── 1_Data_Wrangling.ipynb
@@ -273,7 +274,7 @@ python run_full_inference.py \
 
 95% confidence intervals follow the same bootstrap-the-training-set procedure used for the replication cohort in the paper:
 
-- **DL-M1 CI**: 1,000 CoxPH models, each fit on a bootstrap resample of the discovery cohort using the LASSO-selected feature subset (12 features). The point estimate comes from the full regularized Coxnet model (158 features). Stored in `01_DLM1_Clinico_ResNet/outputs/models/bootstrap_models.pkl`.
+- **DL-M1 CI**: 1,000 CoxPH models (α=0), each fit on a bootstrap resample of the discovery cohort using the LASSO-selected feature subset (12 features). The point estimate comes from `refit_coxph_model.pkl` — an unregularized CoxPH (α=0) refit on all n=282 discovery patients using the same 12 features — ensuring the point estimate is guaranteed to fall within its own CI band. Stored in `01_DLM1_Clinico_ResNet/outputs/models/bootstrap_models.pkl`, `refit_coxph_model.pkl`, and `refit_threshold.pkl`.
 
 - **DL-M2 CI**: 1,000 bootstrap fusion entries, each containing a CoxPH model and its own per-resample StandardScalers for the CR and Molecular risk scores. Each entry scales the new subject's raw risk scores independently before predicting, ensuring consistency within each bootstrap replicate. Stored in `03_Late_Fusion_DLM2/final_model/bootstrap_entries.pkl`.
 
