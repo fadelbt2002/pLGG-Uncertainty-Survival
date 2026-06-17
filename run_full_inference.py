@@ -161,9 +161,19 @@ def _eval_surv(surv_fn, t: float) -> float:
 
 
 def _surv_curve(model, x_row, time_points):
-    """Survival curve for one subject from one model."""
+    """Survival curve for one subject at given time_points (clips to model's event range)."""
     surv_fn = model.predict_survival_function([x_row])[0]
     return np.array([_eval_surv(surv_fn, t) for t in time_points])
+
+
+def _paper_time_points(refit_model, x_df, n: int = 100) -> np.ndarray:
+    """
+    Replicate the paper's time-point sampling: np.linspace(t_min, t_max, 100)
+    derived from the refit CoxPH model's survival function for this subject.
+    All bootstrap curves use the same grid (per-model clipping handled in _surv_curve).
+    """
+    fn = refit_model.predict_survival_function(x_df)[0]
+    return np.linspace(fn.x[0], fn.x[-1], n)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -505,8 +515,6 @@ def step4a_dlm1_scenarios(X_boot: pd.DataFrame,
     print("STEP 4a — DL-M1 Treatment Scenarios + 95% CI")
     print("=" * 65)
 
-    time_points = np.arange(0, 61, 1)
-    boot_feat   = list(bootstrap_models[0].feature_names_in_)
     rows = []
 
     for subject_id in X_boot.index:
@@ -521,10 +529,15 @@ def step4a_dlm1_scenarios(X_boot: pd.DataFrame,
             x_sc = x_boot.copy()
             x_sc["Extent of Tumor Resection"] = sc["resection"]
             x_sc["Chemotherapy"]              = sc["chemo"]
+            x_df = pd.DataFrame([x_sc], columns=list(x_sc.index))
+
+            # Time grid: linspace from refit model's event range (paper's exact approach).
+            # All 1000 bootstrap models use the same grid; each clips to its own event range.
+            time_points = _paper_time_points(refit_model, x_df)
 
             # Point estimate: unregularized CoxPH refit on full discovery cohort
             pt_curve = _surv_curve(refit_model, x_sc.values, time_points)
-            pt_risk  = float(refit_model.predict([x_sc.values])[0])
+            pt_risk  = float(refit_model.predict(x_df)[0])
 
             # Bootstrap CI: 1000 unregularized CoxPH models (same family, same 12 features)
             # → point estimate is guaranteed to fall within its own CI band
@@ -532,16 +545,21 @@ def step4a_dlm1_scenarios(X_boot: pd.DataFrame,
                 _surv_curve(m, x_sc.values, time_points)
                 for m in bootstrap_models
             ])
-            boot_risks  = np.array([float(m.predict([x_sc.values])[0]) for m in bootstrap_models])
+            boot_risks  = np.array([float(m.predict(x_df)[0]) for m in bootstrap_models])
             ci_lo = np.percentile(boot_curves, 2.5,  axis=0)
             ci_hi = np.percentile(boot_curves, 97.5, axis=0)
             risk_ci_lo = float(np.percentile(boot_risks, 2.5))
             risk_ci_hi = float(np.percentile(boot_risks, 97.5))
             risk_group = "High" if pt_risk > refit_threshold else "Low"
 
-            pfs    = [float(pt_curve[t])                             for t in SURV_TIME_POINTS]
-            pfs_lo = [float(np.percentile(boot_curves[:, t], 2.5))  for t in SURV_TIME_POINTS]
-            pfs_hi = [float(np.percentile(boot_curves[:, t], 97.5)) for t in SURV_TIME_POINTS]
+            # PFS at 1/3/5 yr: nearest linspace index (paper's exact lookup)
+            def _pfs_at(t_target, curve):
+                idx = int(np.argmin(np.abs(time_points - t_target)))
+                return float(curve[idx])
+
+            pfs    = [_pfs_at(t, pt_curve)                                          for t in SURV_TIME_POINTS]
+            pfs_lo = [float(np.percentile([_pfs_at(t, bc) for bc in boot_curves], 2.5))  for t in SURV_TIME_POINTS]
+            pfs_hi = [float(np.percentile([_pfs_at(t, bc) for bc in boot_curves], 97.5)) for t in SURV_TIME_POINTS]
 
             rows.append({
                 "SubjectID":  subject_id,
@@ -572,7 +590,7 @@ def step4a_dlm1_scenarios(X_boot: pd.DataFrame,
                       fontsize=13, fontweight="bold")
         ax1.legend(loc="lower left", fontsize=9, framealpha=0.95)
         ax1.set_ylim(0, 1.05)
-        ax1.set_xlim(0, time_points[-1])
+        ax1.set_xlim(left=0)
         ax1.grid(alpha=0.3)
 
         # ── Summary table ────────────────────────────────────────────────────
@@ -605,7 +623,7 @@ def step4a_dlm1_scenarios(X_boot: pd.DataFrame,
             rg = table_data[i - 1][2]
             table[(i, 2)].set_facecolor("#ffcccc" if rg == "High" else "#ccffcc")
         ax2.set_title("Treatment Scenario Summary\n"
-                      "Point estimate: full Coxnet; 95% CI: 2.5th–97.5th bootstrap percentile",
+                      "Point estimate: refit CoxPH (discovery); 95% CI: 2.5th–97.5th bootstrap percentile",
                       fontsize=9, fontweight="bold", pad=20)
 
         fig.suptitle(f"DL-M1 Survival Analysis — {subject_id}",
