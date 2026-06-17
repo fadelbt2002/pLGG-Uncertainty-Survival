@@ -1,0 +1,33 @@
+# Patient data — never commit
+X_clinical.pkl
+X_resnet.pkl
+X_molecular.pkl
+y.pkl
+*/data/
+data/
+
+# Intermediate model outputs with patient-level rows
+*discovery_results.pkl
+*replicate_results.pkl
+*discovery_results.csv
+*replicate_results.csv
+*risk_scores*.csv
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.jupyter/
+
+# Conda / pip env
+*.egg-info/
+.env
+venv/
+env/

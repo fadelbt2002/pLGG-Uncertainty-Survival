@@ -1,0 +1,36 @@
+{
+  "n_folds": 5,
+  "modality": "t2",
+  "best_hyperparams": {
+    "batch_size": 2,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "accumulation_steps": 8
+  },
+  "cv_performance": {
+    "mean_val_loss": 0.09577576665142537,
+    "std_val_loss": 0.0028824938829532603,
+    "ci_lower_loss": 0.09219667777191973,
+    "ci_upper_loss": 0.09935485553093101,
+    "mean_val_dice": 0.8234473186404738,
+    "std_val_dice": 0.004827695577554995,
+    "fold_val_losses": [
+      0.098776597019336,
+      0.09817732084128591,
+      0.09293634765264061,
+      0.09638054234286149,
+      0.09260802540100282
+    ],
+    "fold_val_dices": [
+      0.8181234238898918,
+      0.8192440842588743,
+      0.8286216598418024,
+      0.8232818804681301,
+      0.8279655447436703
+    ]
+  },
+  "mean_best_epoch": 36.8,
+  "final_model_path": "/home/batalf/chop_master_thesis/Final_Thesis_Models_MS/models/cv_hp_search_t2_20260305_024132_try/final_model.pth",
+  "final_model_epochs": 55,
+  "total_train_samples": 721
+}

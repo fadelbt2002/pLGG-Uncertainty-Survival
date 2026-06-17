@@ -1,0 +1,26 @@
+======================================================================
+SEGMENTATION TEST SET EVALUATION REPORT
+======================================================================
+
+Timestamp:      20260308_210800
+Experiment:     /home/batalf/chop_master_thesis/Final_Thesis_Models_MS/models/cv_hp_search_t2_20260305_024132_try
+Test CSV:       /home/batalf/chop_master_thesis/Final_Thesis_Models_MS/src/data/segmentation_dataset_test_03_03_26.csv
+Modality:       t2
+Test samples:   31
+Models:         1
+
+OVERALL PERFORMANCE
+----------------------------------------------------------------------
+Dice:        0.7293 ± 0.0000  (95% CI [0.7293, 0.7293])
+IoU:         0.6197 ± 0.0000  (95% CI [0.6197, 0.6197])
+Sensitivity: 0.7099 ± 0.0000  (95% CI [0.7099, 0.7099])
+Specificity: 0.9995 ± 0.0000  (95% CI [0.9995, 0.9995])
+Precision:   0.8027 ± 0.0000  (95% CI [0.8027, 0.8027])
+F1:          0.7293 ± 0.0000  (95% CI [0.7293, 0.7293])
+
+
+======================================================================
+PAPER-READY LINE
+----------------------------------------------------------------------
+The 3D ResNet-34 segmentation model achieved a mean Dice coefficient of 0.7293 ± 0.0000 (95% CI: [0.7293, 0.7293]) and IoU of 0.6197 ± 0.0000 on the held-out test set (n=31 volumes), with sensitivity of 0.7099 ± 0.0000 and specificity of 0.9995 ± 0.0000.
+======================================================================

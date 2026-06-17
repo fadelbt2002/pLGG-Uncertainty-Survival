@@ -1,0 +1,4 @@
+Risk categorization: Low vs High
+Threshold (50th percentile/median): -0.04390203544849609
+Low: Risk Score <= -0.04390203544849609
+High: Risk Score > -0.04390203544849609

@@ -1,0 +1,28 @@
+{
+    "data_file": "/home/batalf/chop_master_thesis/Final_Thesis_Models_MS/src/data/segmentation_dataset_train_03_03_26.csv",
+    "output_dir": "/home/batalf/chop_master_thesis/Final_Thesis_Models_MS/models/cv_hp_search_t2_20260305_024132_try",
+    "modality": "t2",
+    "model_depth": 34,
+    "pretrained_path": "/home/batalf/chop_master_thesis/3D_ResNET_PreTrained_Code/src/Model/resnet_34_23dataset.pth",
+    "num_epochs": 150,
+    "patience": 7,
+    "num_workers": 8,
+    "seed": 42,
+    "n_folds": 5,
+    "batch_sizes": [
+        2
+    ],
+    "learning_rates": [
+        0.001,
+        0.0003,
+        0.0001
+    ],
+    "weight_decays": [
+        0.0001,
+        0.01
+    ],
+    "accumulation_steps": [
+        4,
+        8
+    ]
+}

@@ -1,0 +1,125 @@
+{
+  "timestamp": "20260308_210800",
+  "experiment_dir": "/home/batalf/chop_master_thesis/Final_Thesis_Models_MS/models/cv_hp_search_t2_20260305_024132_try",
+  "test_data_file": "/home/batalf/chop_master_thesis/Final_Thesis_Models_MS/src/data/segmentation_dataset_test_03_03_26.csv",
+  "modality": "t2",
+  "n_models": 1,
+  "n_test_samples": 31,
+  "aggregated": {
+    "dice": {
+      "mean": 0.729341507919373,
+      "std": 0.0,
+      "ci_lower": 0.729341507919373,
+      "ci_upper": 0.729341507919373,
+      "per_model_means": [
+        0.729341507919373
+      ]
+    },
+    "iou": {
+      "mean": 0.6197237478148553,
+      "std": 0.0,
+      "ci_lower": 0.6197237478148553,
+      "ci_upper": 0.6197237478148553,
+      "per_model_means": [
+        0.6197237478148553
+      ]
+    },
+    "sensitivity": {
+      "mean": 0.7099091852864912,
+      "std": 0.0,
+      "ci_lower": 0.7099091852864912,
+      "ci_upper": 0.7099091852864912,
+      "per_model_means": [
+        0.7099091852864912
+      ]
+    },
+    "specificity": {
+      "mean": 0.999514143313131,
+      "std": 0.0,
+      "ci_lower": 0.999514143313131,
+      "ci_upper": 0.999514143313131,
+      "per_model_means": [
+        0.999514143313131
+      ]
+    },
+    "precision": {
+      "mean": 0.8026909136003063,
+      "std": 0.0,
+      "ci_lower": 0.8026909136003063,
+      "ci_upper": 0.8026909136003063,
+      "per_model_means": [
+        0.8026909136003063
+      ]
+    },
+    "f1": {
+      "mean": 0.7293414771556854,
+      "std": 0.0,
+      "ci_lower": 0.7293414771556854,
+      "ci_upper": 0.7293414771556854,
+      "per_model_means": [
+        0.7293414771556854
+      ]
+    }
+  },
+  "per_model_results": [
+    {
+      "model": "final",
+      "ckpt_path": "/home/batalf/chop_master_thesis/Final_Thesis_Models_MS/models/cv_hp_search_t2_20260305_024132_try/final_model.pth",
+      "n_samples": 31,
+      "dice": {
+        "mean": 0.729341507919373,
+        "std": 0.24765730111846357,
+        "ci_lower": 0.6385000764728999,
+        "ci_upper": 0.8201829393658462,
+        "median": 0.8458160161972046,
+        "min": 0.0,
+        "max": 0.9539990425109863
+      },
+      "iou": {
+        "mean": 0.6197237478148553,
+        "std": 0.24669315398313144,
+        "ci_lower": 0.5292359683927845,
+        "ci_upper": 0.710211527236926,
+        "median": 0.7328259348869324,
+        "min": 0.0,
+        "max": 0.9120441675186157
+      },
+      "sensitivity": {
+        "mean": 0.7099091852864912,
+        "std": 0.26594506732757306,
+        "ci_lower": 0.6123597470383154,
+        "ci_upper": 0.8074586235346669,
+        "median": 0.8208835124969482,
+        "min": 0.0,
+        "max": 0.9643113613128662
+      },
+      "specificity": {
+        "mean": 0.999514143313131,
+        "std": 0.0005604440275668943,
+        "ci_lower": 0.999308570784157,
+        "ci_upper": 0.9997197158421051,
+        "median": 0.9997602701187134,
+        "min": 0.9975535273551941,
+        "max": 1.0
+      },
+      "precision": {
+        "mean": 0.8026909136003063,
+        "std": 0.2611545126261511,
+        "ci_lower": 0.7068986650030492,
+        "ci_upper": 0.8984831621975634,
+        "median": 0.902872622013092,
+        "min": 0.0,
+        "max": 0.9837538599967957
+      },
+      "f1": {
+        "mean": 0.7293414771556854,
+        "std": 0.24765728825157599,
+        "ci_lower": 0.6385000504288247,
+        "ci_upper": 0.8201829038825461,
+        "median": 0.8458159565925598,
+        "min": 0.0,
+        "max": 0.9539990425109863
+      }
+    }
+  ]
+}

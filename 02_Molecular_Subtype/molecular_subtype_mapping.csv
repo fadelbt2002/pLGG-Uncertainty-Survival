@@ -1,0 +1,70 @@
+Molecular Subtype,mol_group,Cohort,n
+"LGG, BRAF V600E",BRAF_V600E,Discovery,28
+"GNG, BRAF V600E",BRAF_V600E,Discovery,15
+"LGG, BRAF V600E, CDKN2A/B",BRAF_V600E,Discovery,7
+"LGG, BRAF V600E",BRAF_V600E,Replicate,5
+"GNT, BRAF V600E",BRAF_V600E,Discovery,4
+"GNG, BRAF V600E",BRAF_V600E,Replicate,2
+"GNT, BRAF V600E",BRAF_V600E,Replicate,2
+"GNG, BRAF V600E, CDKN2A/B",BRAF_V600E,Discovery,1
+"GNG, BRAF V600E, CDKN2A/B",BRAF_V600E,Replicate,1
+"GNG, RTK, BRAF V600E",BRAF_V600E,Discovery,1
+"LGG, BRAF V600E, CDKN2A/B",BRAF_V600E,Replicate,1
+"LGG, BRAF V600E, FGFR",BRAF_V600E,Discovery,1
+"LGG, BRAF V600E, other MAPK",BRAF_V600E,Discovery,1
+"LGG, NF1-germline, BRAF V600E",BRAF_V600E,Discovery,1
+"LGG, NF1-somatic, BRAF V600E",BRAF_V600E,Discovery,1
+"LGG, FGFR",FGFR,Discovery,15
+"GNT, FGFR",FGFR,Discovery,3
+"GNG, FGFR",FGFR,Discovery,1
+"LGG, FGFR",FGFR,Replicate,1
+"LGG, IDH",IDH,Discovery,8
+"GNG, other MAPK, IDH",IDH,Discovery,2
+"LGG, KIAA1549-BRAF",KIAA1549_BRAF,Discovery,153
+"LGG, KIAA1549-BRAF",KIAA1549_BRAF,Replicate,29
+"GNG, KIAA1549-BRAF",KIAA1549_BRAF,Discovery,6
+"LGG, KIAA1549-BRAF, RTK",KIAA1549_BRAF,Discovery,5
+"LGG, KIAA1549-BRAF, other MAPK",KIAA1549_BRAF,Discovery,3
+"LGG, KIAA1549-BRAF, BRAF V600E",KIAA1549_BRAF,Discovery,2
+"GNG, KIAA1549-BRAF",KIAA1549_BRAF,Replicate,1
+"GNT, KIAA1549-BRAF",KIAA1549_BRAF,Discovery,1
+"LGG, FGFR, KIAA1549-BRAF",KIAA1549_BRAF,Discovery,1
+"LGG, KIAA1549-BRAF, CDKN2A/B",KIAA1549_BRAF,Discovery,1
+"LGG, KIAA1549-BRAF, RTK",KIAA1549_BRAF,Replicate,1
+"LGG, MYB/MYBL1",MYB,Discovery,6
+"GNG, MYB/MYBL1",MYB,Discovery,2
+"LGG, NF1-germline",NF1,Discovery,7
+"LGG, NF1-somatic, NF1-germline",NF1,Discovery,3
+"LGG, NF1-germline, CDKN2A/B",NF1,Discovery,2
+"GNT, NF1-somatic, FGFR",NF1,Discovery,1
+"LGG, FGFR, NF1-somatic",NF1,Replicate,1
+"LGG, NF1-germline",NF1,Replicate,1
+"LGG, NF1-germline, FGFR",NF1,Discovery,1
+"LGG, NF1-germline, NF1-somatic",NF1,Discovery,1
+"LGG, NF1-germline, other MAPK",NF1,Discovery,1
+"LGG, NF1-somatic",NF1,Discovery,1
+"LGG, NF1-somatic",NF1,Replicate,1
+"LGG, NF1-somatic, FGFR",NF1,Discovery,1
+"LGG, NF1-somatic, FGFR",NF1,Replicate,1
+"LGG, NF1-somatic, NF1-germline, CDKN2A/B",NF1,Discovery,1
+"LGG, NF1-somatic, NF1-germline, FGFR",NF1,Discovery,1
+"LGG, NF1-somatic, RTK",NF1,Discovery,1
+"LGG, RTK",RTK,Discovery,12
+"GNG, RTK",RTK,Discovery,4
+"LGG, RTK, CDKN2A/B",RTK,Discovery,1
+"LGG, CDKN2A/B",other,Discovery,1
+"LGG, other MAPK",other_MAPK,Discovery,22
+"GNG, other MAPK",other_MAPK,Discovery,5
+"LGG, BRAF/MAPK",other_MAPK,Discovery,4
+"GNG, MAPK",other_MAPK,Discovery,2
+"GNT, other MAPK",other_MAPK,Discovery,2
+"LGG, MAPK",other_MAPK,Discovery,2
+"LGG, other MAPK",other_MAPK,Replicate,2
+"GNG, other MAPK",other_MAPK,Replicate,1
+"LGG, BRAF/MAPK",other_MAPK,Replicate,1
+"LGG, other MAPK, CDKN2A/B",other_MAPK,Discovery,1
+"LGG, wildtype",wildtype,Discovery,65
+"GNG, wildtype",wildtype,Discovery,13
+"LGG, wildtype",wildtype,Replicate,12
+"GNT, wildtype",wildtype,Discovery,4
+"GNG, wildtype",wildtype,Replicate,2
