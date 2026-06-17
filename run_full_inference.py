@@ -481,6 +481,7 @@ def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtypes: dict, output_dir: Path)
 
 def step4a_dlm1_scenarios(X_all_ordered: pd.DataFrame, X_boot: pd.DataFrame,
                            estimator, bootstrap_models: list,
+                           median_threshold: float,
                            output_dir: Path) -> pd.DataFrame:
     """
     X_all_ordered — all 158 features ordered for the main Coxnet estimator (point estimate)
@@ -498,10 +499,11 @@ def step4a_dlm1_scenarios(X_all_ordered: pd.DataFrame, X_boot: pd.DataFrame,
         x_full = X_all_ordered.loc[subject_id]   # 158 features, for point estimate
         x_boot = X_boot.loc[subject_id]           # 12 features, for CI
 
-        fig, axes = plt.subplots(1, 4, figsize=(20, 5), sharey=True)
-        fig.suptitle(f"DL-M1 Treatment Scenarios — {subject_id}", fontweight="bold", fontsize=13)
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        ax1, ax2 = axes
+        scenario_table = []
 
-        for ax, sc in zip(axes, TREATMENT_SCENARIOS):
+        for sc in TREATMENT_SCENARIOS:
             # Patch the treatment features in both feature sets
             x_full_sc = x_full.copy()
             x_full_sc["Extent of Tumor Resection"] = sc["resection"]
@@ -514,45 +516,94 @@ def step4a_dlm1_scenarios(X_all_ordered: pd.DataFrame, X_boot: pd.DataFrame,
                 x_boot_sc["Chemotherapy"] = sc["chemo"]
 
             # Point estimate from main Coxnet
-            pt_curve = _surv_curve(estimator, x_full_sc.values, time_points)
+            pt_curve   = _surv_curve(estimator, x_full_sc.values, time_points)
+            pt_risk    = float(estimator.predict([x_full_sc.values])[0])
 
             # Bootstrap CI from 1000 CoxPH models (12-feature subset)
             boot_curves = np.array([
                 _surv_curve(m, x_boot_sc.values, time_points)
                 for m in bootstrap_models
             ])
+            boot_risks  = np.array([float(m.predict([x_boot_sc.values])[0]) for m in bootstrap_models])
             ci_lo = np.percentile(boot_curves, 2.5,  axis=0)
             ci_hi = np.percentile(boot_curves, 97.5, axis=0)
+            risk_ci_lo = float(np.percentile(boot_risks, 2.5))
+            risk_ci_hi = float(np.percentile(boot_risks, 97.5))
+            risk_group = "High" if pt_risk > median_threshold else "Low"
 
-            pfs    = [float(pt_curve[t])                        for t in SURV_TIME_POINTS]
+            pfs    = [float(pt_curve[t])                             for t in SURV_TIME_POINTS]
             pfs_lo = [float(np.percentile(boot_curves[:, t], 2.5))  for t in SURV_TIME_POINTS]
             pfs_hi = [float(np.percentile(boot_curves[:, t], 97.5)) for t in SURV_TIME_POINTS]
 
             rows.append({
-                "SubjectID": subject_id,
-                "Model":     "DL-M1",
-                "Scenario":  sc["label"],
+                "SubjectID":    subject_id,
+                "Model":        "DL-M1",
+                "Scenario":     sc["label"],
+                "Risk Score":   round(pt_risk, 4),
+                "Risk CI":      f"[{risk_ci_lo:.4f}, {risk_ci_hi:.4f}]",
+                "Risk Group":   risk_group,
                 **{SURV_LABELS[i]: round(pfs[i], 3)    for i in range(3)},
                 **{f"{SURV_LABELS[i]}_CI": f"[{pfs_lo[i]:.3f}, {pfs_hi[i]:.3f}]" for i in range(3)},
             })
+            scenario_table.append({
+                "label": sc["label"],
+                "pt_risk": pt_risk, "risk_ci_lo": risk_ci_lo, "risk_ci_hi": risk_ci_hi,
+                "risk_group": risk_group,
+                "pfs": pfs, "pfs_lo": pfs_lo, "pfs_hi": pfs_hi,
+            })
 
-            ax.plot(time_points, pt_curve, color=sc["color"], lw=2)
-            ax.fill_between(time_points, ci_lo, ci_hi,
-                            color=sc["color"], alpha=CI_ALPHA, label="95% CI")
-            ax.set_title(sc["label"], fontsize=9, fontweight="bold")
-            ax.set_xlabel("Time (months)", fontsize=10)
-            ax.set_ylabel("PFS" if ax == axes[0] else "", fontsize=10)
-            ax.set_ylim(0, 1)
-            ax.grid(True, alpha=0.3)
+            ax1.plot(time_points, pt_curve,
+                     color=sc["color"], linestyle=sc["ls"],
+                     linewidth=2.5, label=sc["label"], alpha=0.9)
+            ax1.fill_between(time_points, ci_lo, ci_hi,
+                             color=sc["color"], alpha=CI_ALPHA)
 
-            for t_idx, t in enumerate(SURV_TIME_POINTS):
-                ax.annotate(f"{pfs[t_idx]:.2f}\n[{pfs_lo[t_idx]:.2f},{pfs_hi[t_idx]:.2f}]",
-                            xy=(t, pt_curve[t]),
-                            fontsize=6.5, ha="center", va="bottom",
-                            color=sc["color"])
+        ax1.set_xlabel("Time (months)", fontsize=12, fontweight="bold")
+        ax1.set_ylabel("Progression-Free Survival Probability", fontsize=12, fontweight="bold")
+        ax1.set_title(f"Subject {subject_id}: Survival Under Treatment Scenarios",
+                      fontsize=13, fontweight="bold")
+        ax1.legend(loc="lower left", fontsize=9, framealpha=0.95)
+        ax1.set_ylim(0, 1.05)
+        ax1.set_xlim(0, time_points[-1])
+        ax1.grid(alpha=0.3)
 
+        # ── Summary table ────────────────────────────────────────────────────
+        ax2.axis("off")
+        headers = ["Treatment Scenario", "Risk Score\n(95% CI)", "Risk\nGroup"] + \
+                  [f"{l}\n(95% CI)" for l in SURV_LABELS]
+        table_data = []
+        for st in scenario_table:
+            row_td = [
+                st["label"],
+                f"{st['pt_risk']:.2f}\n[{st['risk_ci_lo']:.2f}, {st['risk_ci_hi']:.2f}]",
+                st["risk_group"],
+            ]
+            for i in range(3):
+                row_td.append(f"{st['pfs'][i]:.2f}\n[{st['pfs_lo'][i]:.2f}, {st['pfs_hi'][i]:.2f}]")
+            table_data.append(row_td)
+        table = ax2.table(cellText=table_data, colLabels=headers,
+                          cellLoc="center", loc="center",
+                          colWidths=[0.32, 0.15, 0.10] + [0.14] * 3)
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 3.2)
+        for j in range(len(headers)):
+            table[(0, j)].set_facecolor("#1a9850")
+            table[(0, j)].set_text_props(weight="bold", color="white")
+        for i in range(1, len(table_data) + 1):
+            if i % 2 == 0:
+                for j in range(len(headers)):
+                    table[(i, j)].set_facecolor("#f0f0f0")
+            rg = table_data[i - 1][2]
+            table[(i, 2)].set_facecolor("#ffcccc" if rg == "High" else "#ccffcc")
+        ax2.set_title("Treatment Scenario Summary\n"
+                      "Point estimate: full Coxnet; 95% CI: 2.5th–97.5th bootstrap percentile",
+                      fontsize=9, fontweight="bold", pad=20)
+
+        fig.suptitle(f"DL-M1 Survival Analysis — {subject_id}",
+                     fontsize=14, fontweight="bold", y=0.98)
         plt.tight_layout()
-        fig.savefig(str(output_dir / f"{subject_id}_DLM1_scenarios.png"), dpi=200, bbox_inches="tight")
+        fig.savefig(str(output_dir / f"{subject_id}_DLM1_scenarios.png"), dpi=300, bbox_inches="tight")
         plt.close()
         print(f"  {subject_id}: DL-M1 scenario plot saved")
 
@@ -588,6 +639,7 @@ def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
                            scalers: dict,
                            bootstrap_entries: list,
                            dlm1_results: pd.DataFrame,
+                           dlm2_threshold: float,
                            output_dir: Path) -> pd.DataFrame:
     print("\n" + "=" * 65)
     print("STEP 4b — DL-M2 Treatment Scenarios + 95% CI")
@@ -609,10 +661,11 @@ def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
         x_row        = X_all_ordered.loc[subject_id]
         mol_raw_subj = mol_risk_by_subj[subject_id]
 
-        fig, axes = plt.subplots(1, 4, figsize=(20, 5), sharey=True)
-        fig.suptitle(f"DL-M2 Treatment Scenarios — {subject_id}", fontweight="bold", fontsize=13)
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        ax1, ax2 = axes
+        scenario_table = []
 
-        for ax, sc in zip(axes, TREATMENT_SCENARIOS):
+        for sc in TREATMENT_SCENARIOS:
             x_sc = x_row.copy()
             x_sc["Extent of Tumor Resection"] = sc["resection"]
             x_sc["Chemotherapy"]              = sc["chemo"]
@@ -620,7 +673,10 @@ def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
             # DL-M1 risk score for this scenario (point estimate)
             cr_raw_sc = float(dlm1_estimator.predict([x_sc.values])[0])
 
-            # Point estimate survival curve
+            # Point estimate fusion risk score and survival curve
+            cr_sc  = scalers["Clinical-ResNet"].transform([[cr_raw_sc]])[0][0]
+            mol_sc = scalers["Molecular"].transform([[mol_raw_subj]])[0][0]
+            pt_risk = float(fusion_est.predict(np.array([[cr_sc, mol_sc]]))[0])
             pt_curve = _dlm2_fusion_curve(point_entry, cr_raw_sc, mol_raw_subj, time_points)
 
             # Bootstrap CI — each entry re-scales cr_raw and mol_raw with its own scalers
@@ -628,39 +684,93 @@ def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
                 _dlm2_fusion_curve(entry, cr_raw_sc, mol_raw_subj, time_points)
                 for entry in bootstrap_entries
             ])
+            boot_risks = np.array([
+                float(e["model"].predict(np.array([[
+                    e["scaler_cr"].transform([[cr_raw_sc]])[0][0],
+                    e["scaler_mol"].transform([[mol_raw_subj]])[0][0],
+                ]]))[0])
+                for e in bootstrap_entries
+            ])
 
             ci_lo = np.percentile(boot_curves, 2.5,  axis=0)
             ci_hi = np.percentile(boot_curves, 97.5, axis=0)
+            risk_ci_lo = float(np.percentile(boot_risks, 2.5))
+            risk_ci_hi = float(np.percentile(boot_risks, 97.5))
+            risk_group = "High" if pt_risk > dlm2_threshold else "Low"
 
-            pfs    = [float(pt_curve[t])                        for t in SURV_TIME_POINTS]
+            pfs    = [float(pt_curve[t])                             for t in SURV_TIME_POINTS]
             pfs_lo = [float(np.percentile(boot_curves[:, t], 2.5))  for t in SURV_TIME_POINTS]
             pfs_hi = [float(np.percentile(boot_curves[:, t], 97.5)) for t in SURV_TIME_POINTS]
 
             rows.append({
-                "SubjectID": subject_id,
-                "Model":     "DL-M2",
-                "Scenario":  sc["label"],
+                "SubjectID":  subject_id,
+                "Model":      "DL-M2",
+                "Scenario":   sc["label"],
+                "Risk Score": round(pt_risk, 4),
+                "Risk CI":    f"[{risk_ci_lo:.4f}, {risk_ci_hi:.4f}]",
+                "Risk Group": risk_group,
                 **{SURV_LABELS[i]: round(pfs[i], 3)    for i in range(3)},
                 **{f"{SURV_LABELS[i]}_CI": f"[{pfs_lo[i]:.3f}, {pfs_hi[i]:.3f}]" for i in range(3)},
             })
+            scenario_table.append({
+                "label": sc["label"],
+                "pt_risk": pt_risk, "risk_ci_lo": risk_ci_lo, "risk_ci_hi": risk_ci_hi,
+                "risk_group": risk_group,
+                "pfs": pfs, "pfs_lo": pfs_lo, "pfs_hi": pfs_hi,
+            })
 
-            ax.plot(time_points, pt_curve, color=sc["color"], lw=2)
-            ax.fill_between(time_points, ci_lo, ci_hi,
-                            color=sc["color"], alpha=CI_ALPHA, label="95% CI")
-            ax.set_title(sc["label"], fontsize=9, fontweight="bold")
-            ax.set_xlabel("Time (months)", fontsize=10)
-            ax.set_ylabel("PFS" if ax == axes[0] else "", fontsize=10)
-            ax.set_ylim(0, 1)
-            ax.grid(True, alpha=0.3)
+            ax1.plot(time_points, pt_curve,
+                     color=sc["color"], linestyle=sc["ls"],
+                     linewidth=2.5, label=sc["label"], alpha=0.9)
+            ax1.fill_between(time_points, ci_lo, ci_hi,
+                             color=sc["color"], alpha=CI_ALPHA)
 
-            for t_idx, t in enumerate(SURV_TIME_POINTS):
-                ax.annotate(f"{pfs[t_idx]:.2f}\n[{pfs_lo[t_idx]:.2f},{pfs_hi[t_idx]:.2f}]",
-                            xy=(t, pt_curve[t]),
-                            fontsize=6.5, ha="center", va="bottom",
-                            color=sc["color"])
+        ax1.set_xlabel("Time (months)", fontsize=12, fontweight="bold")
+        ax1.set_ylabel("Progression-Free Survival Probability", fontsize=12, fontweight="bold")
+        ax1.set_title(f"Subject {subject_id}: Survival Under Treatment Scenarios",
+                      fontsize=13, fontweight="bold")
+        ax1.legend(loc="lower left", fontsize=9, framealpha=0.95)
+        ax1.set_ylim(0, 1.05)
+        ax1.set_xlim(0, time_points[-1])
+        ax1.grid(alpha=0.3)
 
+        # ── Summary table ────────────────────────────────────────────────────
+        ax2.axis("off")
+        headers = ["Treatment Scenario", "Risk Score\n(95% CI)", "Risk\nGroup"] + \
+                  [f"{l}\n(95% CI)" for l in SURV_LABELS]
+        table_data = []
+        for st in scenario_table:
+            row_td = [
+                st["label"],
+                f"{st['pt_risk']:.2f}\n[{st['risk_ci_lo']:.2f}, {st['risk_ci_hi']:.2f}]",
+                st["risk_group"],
+            ]
+            for i in range(3):
+                row_td.append(f"{st['pfs'][i]:.2f}\n[{st['pfs_lo'][i]:.2f}, {st['pfs_hi'][i]:.2f}]")
+            table_data.append(row_td)
+        table = ax2.table(cellText=table_data, colLabels=headers,
+                          cellLoc="center", loc="center",
+                          colWidths=[0.32, 0.15, 0.10] + [0.14] * 3)
+        table.auto_set_font_size(False)
+        table.set_fontsize(9)
+        table.scale(1, 3.2)
+        for j in range(len(headers)):
+            table[(0, j)].set_facecolor("#1a9850")
+            table[(0, j)].set_text_props(weight="bold", color="white")
+        for i in range(1, len(table_data) + 1):
+            if i % 2 == 0:
+                for j in range(len(headers)):
+                    table[(i, j)].set_facecolor("#f0f0f0")
+            rg = table_data[i - 1][2]
+            table[(i, 2)].set_facecolor("#ffcccc" if rg == "High" else "#ccffcc")
+        ax2.set_title("Treatment Scenario Summary\n"
+                      "Point estimate: discovery fusion model; 95% CI: 2.5th–97.5th bootstrap percentile",
+                      fontsize=9, fontweight="bold", pad=20)
+
+        fig.suptitle(f"DL-M2 Survival Analysis — {subject_id}",
+                     fontsize=14, fontweight="bold", y=0.98)
         plt.tight_layout()
-        fig.savefig(str(output_dir / f"{subject_id}_DLM2_scenarios.png"), dpi=200, bbox_inches="tight")
+        fig.savefig(str(output_dir / f"{subject_id}_DLM2_scenarios.png"), dpi=300, bbox_inches="tight")
         plt.close()
         print(f"  {subject_id}: DL-M2 scenario plot saved")
 
@@ -755,23 +865,24 @@ Examples:
     if not args.skip_step1:
         step1_extract_features(args.image_dir, args.model_path, output_dir, device)
 
-    dlm1_results, X_all, X_all_ord, X_boot, estimator, boot_models, thr = \
+    dlm1_results, X_all, X_all_ord, X_boot, estimator, boot_models, dlm1_threshold = \
         step2_dlm1(args.clinical_xlsx, output_dir)
 
     dlm2_results = mol_risk_by_subj = fusion_est = scalers = boot_entries = None
+    dlm2_threshold = None
     if has_any_mol:
-        dlm2_results, mol_risk_by_subj, fusion_est, scalers, boot_entries, _ = \
+        dlm2_results, mol_risk_by_subj, fusion_est, scalers, boot_entries, dlm2_threshold = \
             step3_dlm2(dlm1_results, mol_subtypes, output_dir)
     else:
         print("\nSTEP 3 — Skipped (all subjects have molecular_subtype = unknown)")
 
-    sc_m1 = step4a_dlm1_scenarios(X_all_ord, X_boot, estimator, boot_models, output_dir)
+    sc_m1 = step4a_dlm1_scenarios(X_all_ord, X_boot, estimator, boot_models, dlm1_threshold, output_dir)
 
     sc_m2 = None
     if dlm2_results is not None and mol_risk_by_subj:
         sc_m2 = step4b_dlm2_scenarios(
             X_all_ord, estimator, mol_risk_by_subj,
-            fusion_est, scalers, boot_entries, dlm1_results, output_dir
+            fusion_est, scalers, boot_entries, dlm1_results, dlm2_threshold, output_dir
         )
 
     print("\n" + "=" * 65)

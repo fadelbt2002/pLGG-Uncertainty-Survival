@@ -104,6 +104,18 @@ Python 3.10+ recommended.
 
 ---
 
+## Preprocessing: Skull-Stripping and Normalization (Step 0)
+
+Before running inference, T2w MRI volumes must be **skull-stripped and intensity-normalized**. This is the same preprocessing applied to all training data. We recommend the D3B pediatric brain auto-segmentation pipeline:
+
+**[d3b-center/peds-brain-auto-seg-public](https://github.com/d3b-center/peds-brain-auto-seg-public)**
+
+This pipeline performs skull stripping and produces normalized NIfTI outputs ready for feature extraction. Follow the instructions in that repository to preprocess your T2w volumes before proceeding.
+
+> The segmentation model (`final_model.pth`) was trained on outputs from this preprocessing pipeline. Using a different skull-stripping method may affect feature quality.
+
+---
+
 ## Preparing Inputs for Inference
 
 The pipeline requires three inputs. Two are straightforward; the clinical spreadsheet needs a bit of preparation.
@@ -223,7 +235,7 @@ python run_full_inference.py \
   --output_dir    results/patient_report
 ```
 
-**What runs:**
+**What runs** (after Step 0 preprocessing):
 
 | Step | Description | Output |
 |------|-------------|--------|

@@ -1,2 +1,0 @@
-Harrell's C-index: 0.702918
-Uno's C-index (train=discovery): 0.735263

@@ -1,2 +1,0 @@
-Harrell's C-index: 0.533688
-Uno's C-index (IPCW weights from discovery): 0.45659883176476307

@@ -50,3 +50,11 @@ Thumbs.db
 # ── Logs ─────────────────────────────────────────────────────────────────────
 *.log
 logs/
+
+# ── Test inference runs (local only — may contain real subject data) ──────────
+test_inference/
+
+# ── Generated output plots and metrics (reproducible from code) ───────────────
+**/outputs/plots/
+**/outputs/metrics/
+

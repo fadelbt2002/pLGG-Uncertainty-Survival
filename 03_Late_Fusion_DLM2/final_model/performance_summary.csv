@@ -1,7 +1,0 @@
-Model,Cohort,N,Harrell_C,Uno_C
-Clinical-ResNet,Discovery,229,0.7841,0.7607
-Clinical-ResNet,Replicate,65,0.6811,0.7337
-Molecular,Discovery,229,0.553,0.6016
-Molecular,Replicate,65,0.5382,0.4602
-Pairwise (Clinico-ResNet + Molecular),Discovery,229,0.7872,0.7801
-Pairwise (Clinico-ResNet + Molecular),Replicate,65,0.6802,0.732
