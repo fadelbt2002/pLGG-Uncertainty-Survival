@@ -173,14 +173,7 @@ Not Applicable
 Unavailable
 ```
 
-**`chemotherapy`** and **`radiation`** — must exactly match one of:
-```
-Yes
-No
-Not Applicable
-Not Reported
-Unavailable
-```
+**`chemotherapy`** and **`radiation`** — `Yes` or `No`
 
 **Example `Clinical_Features.xlsx`** (see `01_DLM1_Clinico_ResNet/LGG_inference/` for a ready-to-use template):
 
