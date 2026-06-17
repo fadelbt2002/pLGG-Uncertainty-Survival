@@ -61,9 +61,10 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 │   └── permutation_sanity_check.py                   # Permutation test (reviewer validation)
 │
 └── 05_Segmentation/
-    ├── train_segmentation.py   # Fine-tune ResNet34 segmentation on pBT cohort (n=752)
-    ├── test_segmentation.py    # Evaluate segmentation model (Dice score)
-    ├── extract_features.py     # Extract layer3/layer4 ResNet features from T2w MRI
+    ├── train_segmentation.py                    # Fine-tune ResNet34 on pBT cohort (n=752)
+    ├── test_segmentation.py                     # Evaluate segmentation model (Dice score)
+    ├── extract_resnet_features_for_inference.py # ← START HERE: folder of NIfTI → ResNet_Features.xlsx
+    ├── extract_features.py                      # Advanced: all layer/pooling variants
     ├── dataset.py              # CombinedSegmentationDataset (T2w, robust normalization)
     ├── model.py                # generate_model() — ResNet34 segmentation head
     ├── resnet_seg.py           # 3D ResNet backbone (resnet10 → resnet200)
@@ -123,22 +124,41 @@ Input files required (see `LGG_inference/` for format):
 
 The segmentation model (ResNet34) was fine-tuned on a pediatric brain tumor cohort (n=752) using T2w MRI only. Trained weights are provided in `05_Segmentation/final_model/final_model.pth` (stored via Git LFS).
 
-**Step 1 — Extract features from your T2w MRI volumes:**
+**Step 1 — Extract ResNet features from your T2w MRI folder:**
+
+```bash
+cd 05_Segmentation
+python extract_resnet_features_for_inference.py \
+  --image_dir /path/to/T2w_nifti_files \
+  --output_dir /path/to/results
+```
+
+- Input: a folder of T2w NIfTI files (`.nii.gz` or `.nii`) — no manifest required.
+  SubjectIDs are parsed automatically from filenames (e.g. `C1234567_T2.nii.gz` → `C1234567`).
+- Output: `ResNet_Features.xlsx` with `SubjectID` + 512 layer4 GAP features — the exact format expected by `inference.py`.
+
+> **Note:** `final_model/final_model.pth` is stored via Git LFS. If the file is missing after cloning, run `git lfs pull`.
+
+**Step 2 — Run DL-M1 risk inference:**
+
+```bash
+cd ../01_DLM1_Clinico_ResNet
+python inference.py \
+  --input-dir  /path/to/results \
+  --output-dir /path/to/results
+```
+
+Also place `Clinical_Features.xlsx` in the same `--input-dir` (see `LGG_inference/` for the expected column layout).
+
+**Advanced: full feature extraction** (all layer/pooling variants for retraining):
 
 ```bash
 cd 05_Segmentation
 python extract_features.py \
-  --excel_path /path/to/LGG_Subject_Feature_Extraction.xlsx \
-  --model_path final_model/final_model.pth \
+  --excel_path /path/to/subjects.xlsx \
   --image_dirs /path/to/T2w_images \
-  --output_dir /path/to/output_features
+  --output_dir /path/to/features
 ```
-
-This produces CSV files with layer3 (256-dim) and layer4 (512-dim) GAP/GMP features per subject.
-
-**Step 2 — Use the extracted features as input to DL-M1:**
-
-Copy the output CSV into `ResNet_Features.xlsx` format (see `01_DLM1_Clinico_ResNet/LGG_inference/` for the expected column layout) and run `inference.py`.
 
 **To retrain the segmentation model** on your own cohort:
 
