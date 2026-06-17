@@ -317,7 +317,8 @@ def read_mol_subtypes(clinical_xlsx: str, cli_mol_subtype: str | None) -> dict:
 
 def step2_dlm1(clinical_xlsx: str, output_dir: Path):
     """
-    Returns (results_df, X_all_df, estimator, bootstrap_models, median_threshold).
+    Returns (results_df, X_all_df, X_all_ordered, X_boot, estimator, bootstrap_models,
+             median_threshold, refit_model, refit_threshold).
     """
     print("\n" + "=" * 65)
     print("STEP 2 — DL-M1 Risk Score + 95% Bootstrap CI")
@@ -335,6 +336,15 @@ def step2_dlm1(clinical_xlsx: str, output_dir: Path):
     estimator       = _load_pkl(paths["estimator_pkl"])
     thr_obj         = _load_pkl(paths["risk_threshold_pkl"])
     median_threshold = thr_obj["median_threshold"] if isinstance(thr_obj, dict) else float(thr_obj)
+
+    # Unregularized CoxPH refit on full discovery cohort (12 LASSO features).
+    # Used for treatment scenario point estimates so that point estimates and
+    # bootstrap CIs come from the same model family (both CoxPH, alpha=0).
+    refit_path = DLM1_DIR / "outputs" / "models" / "refit_coxph_model.pkl"
+    thr2_path  = DLM1_DIR / "outputs" / "models" / "refit_threshold.pkl"
+    refit_model     = _load_pkl(refit_path)
+    refit_thr_obj   = _load_pkl(thr2_path)
+    refit_threshold = refit_thr_obj["median_threshold"] if isinstance(refit_thr_obj, dict) else float(refit_thr_obj)
 
     # Load 1000 bootstrap CoxPH models for CI
     boot_path = DLM1_DIR / "outputs" / "models" / "bootstrap_models.pkl"
@@ -387,7 +397,8 @@ def step2_dlm1(clinical_xlsx: str, output_dir: Path):
 
     print(f"\n  DL-M1 results ({len(results)} subject(s)):")
     print(results.to_string())
-    return results, X_all, X_all_ordered, X_boot, estimator, bootstrap_models, median_threshold
+    return (results, X_all, X_all_ordered, X_boot, estimator, bootstrap_models,
+            median_threshold, refit_model, refit_threshold)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -479,13 +490,16 @@ def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtypes: dict, output_dir: Path)
 # STEP 4a: DL-M1 treatment scenarios + 95% CI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def step4a_dlm1_scenarios(X_all_ordered: pd.DataFrame, X_boot: pd.DataFrame,
-                           estimator, bootstrap_models: list,
-                           median_threshold: float,
+def step4a_dlm1_scenarios(X_boot: pd.DataFrame,
+                           refit_model, bootstrap_models: list,
+                           refit_threshold: float,
                            output_dir: Path) -> pd.DataFrame:
     """
-    X_all_ordered — all 158 features ordered for the main Coxnet estimator (point estimate)
-    X_boot        — 12 LASSO-selected features for bootstrap CoxPH models (CI)
+    Point estimates and 95% CI both come from CoxPHSurvivalAnalysis(alpha=0) on the
+    12 LASSO-selected features, matching the paper's treatment_scenario_DLM1.py:
+      - refit_model:      unregularized CoxPH fit on full discovery cohort
+      - bootstrap_models: 1000 unregularized CoxPH models on bootstrap resamples
+    This guarantees the point estimate always falls within its own CI band.
     """
     print("\n" + "=" * 65)
     print("STEP 4a — DL-M1 Treatment Scenarios + 95% CI")
@@ -495,53 +509,47 @@ def step4a_dlm1_scenarios(X_all_ordered: pd.DataFrame, X_boot: pd.DataFrame,
     boot_feat   = list(bootstrap_models[0].feature_names_in_)
     rows = []
 
-    for subject_id in X_all_ordered.index:
-        x_full = X_all_ordered.loc[subject_id]   # 158 features, for point estimate
-        x_boot = X_boot.loc[subject_id]           # 12 features, for CI
+    for subject_id in X_boot.index:
+        x_boot = X_boot.loc[subject_id]   # 12 LASSO-selected features
 
         fig, axes = plt.subplots(1, 2, figsize=(16, 6))
         ax1, ax2 = axes
         scenario_table = []
 
         for sc in TREATMENT_SCENARIOS:
-            # Patch the treatment features in both feature sets
-            x_full_sc = x_full.copy()
-            x_full_sc["Extent of Tumor Resection"] = sc["resection"]
-            x_full_sc["Chemotherapy"]              = sc["chemo"]
+            # Patch treatment features in the 12-feature subset (used by both refit and bootstrap)
+            x_sc = x_boot.copy()
+            x_sc["Extent of Tumor Resection"] = sc["resection"]
+            x_sc["Chemotherapy"]              = sc["chemo"]
 
-            x_boot_sc = x_boot.copy()
-            if "Extent of Tumor Resection" in boot_feat:
-                x_boot_sc["Extent of Tumor Resection"] = sc["resection"]
-            if "Chemotherapy" in boot_feat:
-                x_boot_sc["Chemotherapy"] = sc["chemo"]
+            # Point estimate: unregularized CoxPH refit on full discovery cohort
+            pt_curve = _surv_curve(refit_model, x_sc.values, time_points)
+            pt_risk  = float(refit_model.predict([x_sc.values])[0])
 
-            # Point estimate from main Coxnet
-            pt_curve   = _surv_curve(estimator, x_full_sc.values, time_points)
-            pt_risk    = float(estimator.predict([x_full_sc.values])[0])
-
-            # Bootstrap CI from 1000 CoxPH models (12-feature subset)
+            # Bootstrap CI: 1000 unregularized CoxPH models (same family, same 12 features)
+            # → point estimate is guaranteed to fall within its own CI band
             boot_curves = np.array([
-                _surv_curve(m, x_boot_sc.values, time_points)
+                _surv_curve(m, x_sc.values, time_points)
                 for m in bootstrap_models
             ])
-            boot_risks  = np.array([float(m.predict([x_boot_sc.values])[0]) for m in bootstrap_models])
+            boot_risks  = np.array([float(m.predict([x_sc.values])[0]) for m in bootstrap_models])
             ci_lo = np.percentile(boot_curves, 2.5,  axis=0)
             ci_hi = np.percentile(boot_curves, 97.5, axis=0)
             risk_ci_lo = float(np.percentile(boot_risks, 2.5))
             risk_ci_hi = float(np.percentile(boot_risks, 97.5))
-            risk_group = "High" if pt_risk > median_threshold else "Low"
+            risk_group = "High" if pt_risk > refit_threshold else "Low"
 
             pfs    = [float(pt_curve[t])                             for t in SURV_TIME_POINTS]
             pfs_lo = [float(np.percentile(boot_curves[:, t], 2.5))  for t in SURV_TIME_POINTS]
             pfs_hi = [float(np.percentile(boot_curves[:, t], 97.5)) for t in SURV_TIME_POINTS]
 
             rows.append({
-                "SubjectID":    subject_id,
-                "Model":        "DL-M1",
-                "Scenario":     sc["label"],
-                "Risk Score":   round(pt_risk, 4),
-                "Risk CI":      f"[{risk_ci_lo:.4f}, {risk_ci_hi:.4f}]",
-                "Risk Group":   risk_group,
+                "SubjectID":  subject_id,
+                "Model":      "DL-M1",
+                "Scenario":   sc["label"],
+                "Risk Score": round(pt_risk, 4),
+                "Risk CI":    f"[{risk_ci_lo:.4f}, {risk_ci_hi:.4f}]",
+                "Risk Group": risk_group,
                 **{SURV_LABELS[i]: round(pfs[i], 3)    for i in range(3)},
                 **{f"{SURV_LABELS[i]}_CI": f"[{pfs_lo[i]:.3f}, {pfs_hi[i]:.3f}]" for i in range(3)},
             })
@@ -865,7 +873,8 @@ Examples:
     if not args.skip_step1:
         step1_extract_features(args.image_dir, args.model_path, output_dir, device)
 
-    dlm1_results, X_all, X_all_ord, X_boot, estimator, boot_models, dlm1_threshold = \
+    (dlm1_results, X_all, X_all_ord, X_boot, estimator, boot_models,
+     dlm1_threshold, refit_model, refit_threshold) = \
         step2_dlm1(args.clinical_xlsx, output_dir)
 
     dlm2_results = mol_risk_by_subj = fusion_est = scalers = boot_entries = None
@@ -876,7 +885,7 @@ Examples:
     else:
         print("\nSTEP 3 — Skipped (all subjects have molecular_subtype = unknown)")
 
-    sc_m1 = step4a_dlm1_scenarios(X_all_ord, X_boot, estimator, boot_models, dlm1_threshold, output_dir)
+    sc_m1 = step4a_dlm1_scenarios(X_boot, refit_model, boot_models, refit_threshold, output_dir)
 
     sc_m2 = None
     if dlm2_results is not None and mol_risk_by_subj:
