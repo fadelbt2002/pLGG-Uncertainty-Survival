@@ -26,6 +26,8 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 ## Repository Structure
 
 ```
+├── run_full_inference.py           # ← END-TO-END: T2w NIfTI → DL-M1 → DL-M2 → treatment scenarios
+│
 ├── 01_DLM1_Clinico_ResNet/         # DL-M1: imaging + clinical Cox model
 │   ├── 1_Data_Wrangling.ipynb
 │   ├── 2_Feature_Engineering.ipynb
@@ -101,9 +103,35 @@ Notebooks are numbered and should be run in order within each module:
 
 ---
 
-## Inference on New Subjects
+## Full End-to-End Inference (Recommended)
 
-To apply the trained DL-M1 model to new patients:
+Run the complete pipeline — from raw T2w MRI to risk report and treatment simulations — with a single command:
+
+```bash
+python run_full_inference.py \
+  --image_dir     /path/to/T2w_nifti_files \
+  --clinical_xlsx /path/to/Clinical_Features.xlsx \
+  --mol_subtype   KIAA1549_BRAF \
+  --output_dir    results/patient_report
+```
+
+This runs four steps automatically:
+1. **ResNet feature extraction** — layer3 GAP+GMP from fine-tuned ResNet34 (512 features)
+2. **DL-M1 risk score** — penalized Cox model (clinical + imaging)
+3. **DL-M2 risk score** — late-fusion with molecular subtype model (omit with `--mol_subtype unknown`)
+4. **Treatment scenario simulations** — 4 resection × chemotherapy combinations → survival curves
+
+Outputs are written to `--output_dir`: `ResNet_Features.xlsx`, `DLM1_risk_results.csv`, `DLM2_risk_results.csv`, `treatment_scenarios.png`, `treatment_scenarios.csv`, `full_report.csv`.
+
+Molecular subtype choices: `KIAA1549_BRAF`, `BRAF_V600E`, `NF1`, `FGFR`, `RTK`, `IDH`, `MYB`, `other_MAPK`, `wildtype`, `unknown`.
+
+See `01_DLM1_Clinico_ResNet/LGG_inference/` for the expected `Clinical_Features.xlsx` column format.
+
+---
+
+## Step-by-Step Inference (Alternative)
+
+To run individual steps manually:
 
 ```bash
 cd 01_DLM1_Clinico_ResNet
@@ -135,7 +163,7 @@ python extract_resnet_features_for_inference.py \
 
 - Input: a folder of T2w NIfTI files (`.nii.gz` or `.nii`) — no manifest required.
   SubjectIDs are parsed automatically from filenames (e.g. `C1234567_T2.nii.gz` → `C1234567`).
-- Output: `ResNet_Features.xlsx` with `SubjectID` + 512 layer4 GAP features — the exact format expected by `inference.py`.
+- Output: `ResNet_Features.xlsx` with `SubjectID` + 512 features (layer3 GAP+GMP) — the exact format expected by `inference.py`.
 
 > **Note:** `final_model/final_model.pth` is stored via Git LFS. If the file is missing after cloning, run `git lfs pull`.
 

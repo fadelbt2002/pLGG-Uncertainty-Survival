@@ -1,0 +1,3 @@
+Fusion threshold (median of discovery risk scores): -0.148616
+Discovery N: 229
+Replicate N: 65

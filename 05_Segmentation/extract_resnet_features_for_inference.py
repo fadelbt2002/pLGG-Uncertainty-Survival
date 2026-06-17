@@ -10,8 +10,8 @@ ResNet_Features.xlsx ready to drop straight into
 No Excel manifest required — SubjectIDs are read directly from the NIfTI
 filenames (everything before the first underscore or the full stem).
 
-Feature extracted: layer4 Global Average Pooling (GAP) from the fine-tuned
-ResNet34 segmentation backbone → 512-dimensional vector per subject.
+Feature extracted: layer3 GAP + GMP from the fine-tuned ResNet34 segmentation
+backbone → 512-dimensional vector per subject (256 GAP + 256 GMP).
 This is the exact feature set used to train the DL-M1 survival model.
 
 Usage (minimal):
@@ -158,40 +158,43 @@ class SegmentationFeatureExtractor(nn.Module):
         return self.base_model(x)
 
 
-# ── Feature extraction — layer4 GAP only ─────────────────────────────────────
+# ── Feature extraction — layer3 GAP + GMP (512-dim) ──────────────────────────
+# layer3 GAP (256) concatenated with layer3 GMP (256) = 512 features total.
+# This is the exact feature set used to train the DL-M1 survival model.
 
-def extract_layer4_gap(model: SegmentationFeatureExtractor,
-                       loader: DataLoader,
-                       device: torch.device,
-                       logger: logging.Logger) -> tuple[np.ndarray, list[int]]:
+def extract_layer3_gap_gmp(model: SegmentationFeatureExtractor,
+                            loader: DataLoader,
+                            device: torch.device,
+                            logger: logging.Logger) -> tuple[np.ndarray, list[int]]:
     """
     Returns (features, indices):
-        features  — (N, 512) float32 array  (layer4 Global Average Pooling)
-        indices   — list of dataset indices in extraction order
+        features — (N, 512) float32  [layer3_GAP (256) | layer3_GMP (256)]
+        indices  — dataset indices in extraction order
     """
-    raw_layer4: list[np.ndarray] = []
+    collected: list[np.ndarray] = []
     all_indices: list[int] = []
     captured: dict = {}
 
     def _hook(module, inp, out):
-        captured["layer4"] = out.detach().cpu()
+        captured["layer3"] = out.detach().cpu()
 
-    handle = model.base_model.layer4.register_forward_hook(_hook)
+    handle = model.base_model.layer3.register_forward_hook(_hook)
 
     try:
         with torch.no_grad():
             for batch_idx, (volumes, indices) in enumerate(loader):
                 model(volumes.to(device))
-                feat = captured["layer4"]                     # (B, 512, D, H, W)
-                gap  = feat.mean(dim=[2, 3, 4]).numpy()       # (B, 512)
-                raw_layer4.append(gap)
+                feat = captured["layer3"]                      # (B, 256, D, H, W)
+                gap  = feat.mean(dim=[2, 3, 4]).numpy()        # (B, 256)
+                gmp  = feat.amax(dim=[2, 3, 4]).numpy()        # (B, 256)
+                collected.append(np.concatenate([gap, gmp], axis=1))  # (B, 512)
                 all_indices.extend(indices.tolist())
                 if (batch_idx + 1) % 5 == 0 or (batch_idx + 1) == len(loader):
                     logger.info(f"  Processed {batch_idx + 1}/{len(loader)} batches")
     finally:
         handle.remove()
 
-    return np.concatenate(raw_layer4, axis=0), all_indices
+    return np.concatenate(collected, axis=0), all_indices
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -293,9 +296,9 @@ Examples:
     logger.info("Model loaded ✓")
 
     # Extract
-    logger.info(f"\nExtracting layer4 GAP features ({len(dataset)} subjects)...")
-    features, indices = extract_layer4_gap(model, loader, device, logger)
-    logger.info(f"Extraction complete: {features.shape}  (subjects × 512 features)")
+    logger.info(f"\nExtracting layer3 GAP+GMP features ({len(dataset)} subjects)...")
+    features, indices = extract_layer3_gap_gmp(model, loader, device, logger)
+    logger.info(f"Extraction complete: {features.shape}  (subjects × 512 features [layer3 GAP|GMP])")
 
     # Build output DataFrame
     subject_ids = [dataset.subject_id(i) for i in indices]
@@ -310,7 +313,7 @@ Examples:
 
     logger.info(f"\n✓ Saved: {out_path}")
     logger.info(f"  Subjects : {len(df_out)}")
-    logger.info(f"  Features : {features.shape[1]} (layer4 GAP)")
+    logger.info(f"  Features : {features.shape[1]} (layer3 GAP+GMP)")
 
     logger.info("\n" + "=" * 65)
     logger.info("Next step — run DL-M1 risk inference:")
