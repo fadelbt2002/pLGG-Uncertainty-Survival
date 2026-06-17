@@ -1,4 +1,0 @@
-Independent t-test (High vs Low Risk)
-T-statistic: 26.58991285850408
-p-value: 1.3998767636492847e-78
-Median threshold: -0.1256426243281814

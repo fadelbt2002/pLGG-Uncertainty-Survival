@@ -57,4 +57,5 @@ test_inference/
 # ── Generated output plots and metrics (reproducible from code) ───────────────
 **/outputs/plots/
 **/outputs/metrics/
+**/LGG_inference/
 
