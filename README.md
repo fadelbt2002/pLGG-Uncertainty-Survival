@@ -150,6 +150,7 @@ Create an Excel file (`Clinical_Features.xlsx`) with **exactly these 8 columns**
 | `extent_of_tumor_resection` | string | Surgical extent — see valid values below |
 | `chemotherapy` | string | Chemotherapy received — see valid values below |
 | `radiation` | string | Radiation received — see valid values below |
+| `molecular_subtype` | string | Molecular driver — see valid values below. Leave blank or write `unknown` to skip DL-M2 for that subject. |
 
 **Valid values for each categorical column:**
 
@@ -189,11 +190,11 @@ Multiple subjects can be listed as additional rows — the pipeline scores all o
 
 ---
 
-### Input 4 — Molecular Subtype (command-line argument)
+### Input 4 — Molecular Subtype (spreadsheet column, recommended)
 
-The molecular subtype is passed directly as `--mol_subtype`. It does not appear in the clinical spreadsheet.
+Add a `molecular_subtype` column to `Clinical_Features.xlsx`. Each subject can have a different subtype, which is the recommended approach for multi-subject runs.
 
-Pass one of the following strings:
+Valid values:
 
 | Argument value | Molecular alteration |
 |----------------|----------------------|
@@ -208,7 +209,7 @@ Pass one of the following strings:
 | `wildtype` | No known driver (wildtype / other) |
 | `unknown` | Molecular status unavailable — skips DL-M2 and runs DL-M1 only |
 
-> If molecular testing has not been performed, use `--mol_subtype unknown`. The pipeline will still run Steps 1, 2, and 4a (DL-M1 treatment scenarios with 95% CI).
+The `--mol_subtype` CLI flag is a fallback that applies the same subtype to all subjects when the column is absent from the spreadsheet. If molecular testing has not been performed, leave the `molecular_subtype` cell blank or write `unknown` — the pipeline will run Steps 1, 2, and 4a (DL-M1 only) for that subject.
 
 ---
 

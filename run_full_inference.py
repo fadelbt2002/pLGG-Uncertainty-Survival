@@ -23,8 +23,8 @@ Steps
   4b DL-M2 treatment scenarios + 95% CI  [requires --mol_subtype]
        Same 4 scenarios propagated through the fusion model
 
-Clinical_Features.xlsx format (8 columns only)
-------------------------------------------------
+Clinical_Features.xlsx format (9 columns)
+------------------------------------------
   SubjectID                   — must match NIfTI filename prefix
   legal_sex                   — Female | Male
   age_at_event_days           — integer (days at imaging)
@@ -35,26 +35,29 @@ Clinical_Features.xlsx format (8 columns only)
                                 Neurofibromatosis, Type 1 (NF-1)
   extent_of_tumor_resection   — Biopsy only | Partial resection |
                                 Gross/Near total resection | Not Applicable
-  chemotherapy                — Yes | No | Not Applicable
-  radiation                   — Yes | No | Not Applicable
+  chemotherapy                — Yes | No
+  radiation                   — Yes | No
+  molecular_subtype           — per-subject molecular subtype (see choices below);
+                                leave blank or write 'unknown' to skip DL-M2 for
+                                that subject only
+
+Molecular subtype choices (molecular_subtype column or --mol_subtype flag):
+  KIAA1549_BRAF  BRAF_V600E  NF1  FGFR  RTK  IDH  MYB  other_MAPK  wildtype  unknown
 
 Usage
 -----
+  # molecular_subtype column in the spreadsheet (recommended for multi-subject runs):
+  python run_full_inference.py \\
+      --image_dir     /path/to/T2w_nifti_files \\
+      --clinical_xlsx /path/to/Clinical_Features.xlsx \\
+      --output_dir    results/report
+
+  # override / fallback for all subjects via CLI:
   python run_full_inference.py \\
       --image_dir     /path/to/T2w_nifti_files \\
       --clinical_xlsx /path/to/Clinical_Features.xlsx \\
       --mol_subtype   KIAA1549_BRAF \\
       --output_dir    results/report
-
-  # Without molecular subtype (Steps 1, 2, 4a only):
-  python run_full_inference.py \\
-      --image_dir     /path/to/T2w_nifti_files \\
-      --clinical_xlsx /path/to/Clinical_Features.xlsx \\
-      --mol_subtype   unknown \\
-      --output_dir    results/report
-
-Molecular subtype choices:
-  KIAA1549_BRAF  BRAF_V600E  NF1  FGFR  RTK  IDH  MYB  other_MAPK  wildtype  unknown
 
 Outputs
 -------
@@ -281,6 +284,37 @@ def _build_dlm1_cfg(clinical_xlsx: str, output_dir: Path) -> dict:
     return cfg
 
 
+def read_mol_subtypes(clinical_xlsx: str, cli_mol_subtype: str | None) -> dict:
+    """
+    Returns {SubjectID: mol_subtype_key} for every subject.
+
+    Priority:
+      1. 'molecular_subtype' column in the spreadsheet (per-subject)
+      2. --mol_subtype CLI flag (fallback applied to all subjects)
+    Blank / NaN / unrecognised spreadsheet values fall back to the CLI flag,
+    or to 'unknown' if neither is provided.
+    """
+    df = pd.read_excel(clinical_xlsx)
+    has_col = "molecular_subtype" in df.columns
+
+    if not has_col and cli_mol_subtype is None:
+        raise ValueError(
+            "No 'molecular_subtype' column in the spreadsheet and --mol_subtype not provided.\n"
+            "Add the column to Clinical_Features.xlsx or pass --mol_subtype on the command line."
+        )
+
+    result = {}
+    for _, row in df.iterrows():
+        subj = str(row["SubjectID"])
+        if has_col:
+            val = str(row.get("molecular_subtype", "")).strip()
+            val = val if val in MOL_SUBTYPE_MAP else (cli_mol_subtype or "unknown")
+        else:
+            val = cli_mol_subtype
+        result[subj] = val
+    return result
+
+
 def step2_dlm1(clinical_xlsx: str, output_dir: Path):
     """
     Returns (results_df, X_all_df, estimator, bootstrap_models, median_threshold).
@@ -360,70 +394,85 @@ def step2_dlm1(clinical_xlsx: str, output_dir: Path):
 # STEP 3: DL-M2 risk score + 95% bootstrap CI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_mol_features(subject_ids: list, mol_subtype_key: str) -> pd.DataFrame:
+def _build_mol_features_row(mol_subtype_key: str) -> pd.DataFrame:
+    """One-hot encode a single molecular subtype into a (1, 9) DataFrame."""
     all_cols = [v for v in MOL_SUBTYPE_MAP.values() if v is not None]
-    df = pd.DataFrame(0, index=subject_ids, columns=all_cols)
+    df = pd.DataFrame(0, index=[0], columns=all_cols)
     df[MOL_SUBTYPE_MAP[mol_subtype_key]] = 1
     return df
 
 
-def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtype: str, output_dir: Path):
+def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtypes: dict, output_dir: Path):
     """
-    Returns (results_df, mol_risk_raw, fusion_est, scalers, bootstrap_entries, threshold).
+    mol_subtypes: {SubjectID: mol_subtype_key} — per-subject, from read_mol_subtypes().
+    Subjects whose subtype is 'unknown' are skipped (no DL-M2 row produced).
+
+    Returns (results_df, mol_risk_by_subj, fusion_est, scalers, bootstrap_entries, threshold).
+    mol_risk_by_subj: dict {SubjectID: float} of raw molecular risk scores (unknown subjects absent).
     """
     print("\n" + "=" * 65)
     print("STEP 3 — DL-M2 Fusion Risk Score + 95% Bootstrap CI")
     print("=" * 65)
 
-    mol_est    = _load_pkl(MOL_DIR / "outputs" / "models" / "estimator.pkl")
-    fusion_est = _load_pkl(DLM2_DIR / "model.pkl")
-    scalers    = _load_pkl(DLM2_DIR / "scalers.pkl")
-    threshold  = float(open(DLM2_DIR / "threshold.txt").read().split(":")[1].split("\n")[0].strip())
-
+    mol_est      = _load_pkl(MOL_DIR / "outputs" / "models" / "estimator.pkl")
+    fusion_est   = _load_pkl(DLM2_DIR / "model.pkl")
+    scalers      = _load_pkl(DLM2_DIR / "scalers.pkl")
+    threshold    = float(open(DLM2_DIR / "threshold.txt").read().split(":")[1].split("\n")[0].strip())
     boot_entries = _load_pkl(DLM2_DIR / "bootstrap_entries.pkl")
     print(f"  Loaded {len(boot_entries)} bootstrap entries for 95% CI")
+    print(f"  DL-M2 threshold: {threshold:.6f}")
 
-    subject_ids = dlm1_results.index.tolist()
-    X_mol       = _build_mol_features(subject_ids, mol_subtype)
-    mol_risk    = mol_est.predict(X_mol)          # (N,) raw molecular risk scores
-    cr_risk     = dlm1_results["Risk Score"].values  # (N,) point estimates
+    records          = {}
+    mol_risk_by_subj = {}
 
-    # Point estimates — use original discovery scalers
-    cr_scaled   = scalers["Clinical-ResNet"].transform(cr_risk.reshape(-1, 1)).flatten()
-    mol_scaled  = scalers["Molecular"].transform(mol_risk.reshape(-1, 1)).flatten()
-    fusion_pt   = fusion_est.predict(np.column_stack([cr_scaled, mol_scaled]))
+    for subj in dlm1_results.index:
+        mol_key = mol_subtypes.get(subj, "unknown")
+        if mol_key == "unknown":
+            print(f"  {subj}: molecular_subtype = unknown — skipping DL-M2")
+            continue
 
-    # Bootstrap CI — each entry supplies its own (model, scaler_cr, scaler_mol)
-    boot_fusion = np.array([
-        entry["model"].predict(np.column_stack([
-            entry["scaler_cr"].transform(cr_risk.reshape(-1, 1)).flatten(),
-            entry["scaler_mol"].transform(mol_risk.reshape(-1, 1)).flatten(),
-        ]))
-        for entry in boot_entries
-    ])  # (1000, N)
+        cr_risk   = float(dlm1_results.loc[subj, "Risk Score"])
+        X_mol_row = _build_mol_features_row(mol_key)
+        mol_risk  = float(mol_est.predict(X_mol_row)[0])
 
-    records = []
-    for i, subj in enumerate(subject_ids):
-        score = fusion_pt[i]
-        ci_lo = np.percentile(boot_fusion[:, i], 2.5)
-        ci_hi = np.percentile(boot_fusion[:, i], 97.5)
-        records.append({
-            "DLM1_Risk_Score":      round(cr_risk[i], 4),
-            "Mol_Risk_Score":       round(mol_risk[i], 4),
+        # Point estimate
+        cr_sc  = scalers["Clinical-ResNet"].transform([[cr_risk]])[0][0]
+        mol_sc = scalers["Molecular"].transform([[mol_risk]])[0][0]
+        score  = float(fusion_est.predict(np.array([[cr_sc, mol_sc]]))[0])
+
+        # Bootstrap CI
+        boot_scores = np.array([
+            entry["model"].predict(np.array([[
+                entry["scaler_cr"].transform([[cr_risk]])[0][0],
+                entry["scaler_mol"].transform([[mol_risk]])[0][0],
+            ]]))[0]
+            for entry in boot_entries
+        ])
+
+        ci_lo = float(np.percentile(boot_scores, 2.5))
+        ci_hi = float(np.percentile(boot_scores, 97.5))
+
+        mol_risk_by_subj[subj] = mol_risk
+        records[subj] = {
+            "Molecular_Subtype":    mol_key,
+            "DLM1_Risk_Score":      round(cr_risk, 4),
+            "Mol_Risk_Score":       round(mol_risk, 4),
             "DLM2_Risk_Score":      round(score, 4),
             "DLM2_CI_Lower":        round(ci_lo, 4),
             "DLM2_CI_Upper":        round(ci_hi, 4),
             "DLM2_Risk_Group":      "High" if score > threshold else "Low",
-        })
+        }
+        print(f"  {subj}: subtype={mol_key}  DL-M2={score:.4f} [{ci_lo:.4f}, {ci_hi:.4f}]  {records[subj]['DLM2_Risk_Group']}")
 
-    df = pd.DataFrame(records, index=pd.Index(subject_ids, name="SubjectID"))
+    if not records:
+        print("  No subjects with known molecular subtype — DL-M2 skipped for all.")
+        return None, {}, fusion_est, scalers, boot_entries, threshold
+
+    df = pd.DataFrame.from_dict(records, orient="index")
+    df.index.name = "SubjectID"
     df.to_csv(str(output_dir / "DLM2_risk_results.csv"))
-
-    print(f"  Molecular subtype : {mol_subtype}  →  {MOL_SUBTYPE_MAP[mol_subtype]}")
-    print(f"  DL-M2 threshold   : {threshold:.6f}")
-    print(f"\n  DL-M2 results ({len(df)} subject(s)):")
-    print(df.to_string())
-    return df, mol_risk, fusion_est, scalers, boot_entries, threshold
+    print(f"\n  Saved → {output_dir / 'DLM2_risk_results.csv'}")
+    return df, mol_risk_by_subj, fusion_est, scalers, boot_entries, threshold
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -534,7 +583,7 @@ def _dlm2_fusion_curve(entry_or_tuple, cr_raw, mol_raw, time_points):
 
 def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
                            dlm1_estimator,
-                           mol_risk_raw: np.ndarray,
+                           mol_risk_by_subj: dict,
                            fusion_est,
                            scalers: dict,
                            bootstrap_entries: list,
@@ -553,11 +602,12 @@ def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
 
     time_points = np.arange(0, 61, 1)
     rows = []
-    subj_list = X_all_ordered.index.tolist()
-
-    for s_idx, subject_id in enumerate(subj_list):
+    for subject_id in X_all_ordered.index:
+        if subject_id not in mol_risk_by_subj:
+            print(f"  {subject_id}: no molecular subtype — skipping DL-M2 scenario plot")
+            continue
         x_row        = X_all_ordered.loc[subject_id]
-        mol_raw_subj = float(mol_risk_raw[s_idx])
+        mol_raw_subj = mol_risk_by_subj[subject_id]
 
         fig, axes = plt.subplots(1, 4, figsize=(20, 5), sharey=True)
         fig.suptitle(f"DL-M2 Treatment Scenarios — {subject_id}", fontweight="bold", fontsize=13)
@@ -658,21 +708,31 @@ def main():
         description="Full pLGG Risk Inference with 95% Bootstrap CI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Molecular subtype choices (--mol_subtype):
-  KIAA1549_BRAF  BRAF_V600E  NF1  FGFR  RTK  IDH  MYB  other_MAPK  wildtype
-  unknown        (skips Steps 3 and 4b)
+Molecular subtype per subject — add a 'molecular_subtype' column to Clinical_Features.xlsx:
+  KIAA1549_BRAF  BRAF_V600E  NF1  FGFR  RTK  IDH  MYB  other_MAPK  wildtype  unknown
+
+--mol_subtype applies the same subtype to all subjects (fallback when the column is absent).
 
 Examples:
+  # molecular_subtype column in spreadsheet (recommended):
   python run_full_inference.py \\
-      --image_dir     test_inference/T2w_scans \\
-      --clinical_xlsx test_inference/Clinical_Features.xlsx \\
+      --image_dir     example/T2w_scans \\
+      --clinical_xlsx example/Clinical_Features.xlsx \\
+      --output_dir    results/report
+
+  # single subtype for all subjects via CLI:
+  python run_full_inference.py \\
+      --image_dir     example/T2w_scans \\
+      --clinical_xlsx example/Clinical_Features.xlsx \\
       --mol_subtype   KIAA1549_BRAF \\
-      --output_dir    test_inference/output
+      --output_dir    results/report
 """,
     )
     parser.add_argument("--image_dir",     required=True)
     parser.add_argument("--clinical_xlsx", required=True)
-    parser.add_argument("--mol_subtype",   required=True, choices=list(MOL_SUBTYPE_MAP.keys()))
+    parser.add_argument("--mol_subtype",   default=None, choices=list(MOL_SUBTYPE_MAP.keys()),
+                        help="Fallback subtype for all subjects when 'molecular_subtype' "
+                             "column is absent from the spreadsheet (default: read from spreadsheet)")
     parser.add_argument("--output_dir",    default="inference_report")
     parser.add_argument("--model_path",    default=None,
                         help="Path to .pth (default: 05_Segmentation/final_model/final_model.pth)")
@@ -688,23 +748,29 @@ Examples:
     print("pLGG Full Risk Inference Pipeline")
     print("=" * 65)
 
+    # Resolve molecular subtypes per subject (spreadsheet column takes priority)
+    mol_subtypes = read_mol_subtypes(args.clinical_xlsx, args.mol_subtype)
+    has_any_mol  = any(v != "unknown" for v in mol_subtypes.values())
+
     if not args.skip_step1:
         step1_extract_features(args.image_dir, args.model_path, output_dir, device)
 
     dlm1_results, X_all, X_all_ord, X_boot, estimator, boot_models, thr = \
         step2_dlm1(args.clinical_xlsx, output_dir)
 
-    dlm2_results = mol_risk_raw = fusion_est = scalers = boot_entries = None
-    if args.mol_subtype != "unknown":
-        dlm2_results, mol_risk_raw, fusion_est, scalers, boot_entries, _ = \
-            step3_dlm2(dlm1_results, args.mol_subtype, output_dir)
+    dlm2_results = mol_risk_by_subj = fusion_est = scalers = boot_entries = None
+    if has_any_mol:
+        dlm2_results, mol_risk_by_subj, fusion_est, scalers, boot_entries, _ = \
+            step3_dlm2(dlm1_results, mol_subtypes, output_dir)
+    else:
+        print("\nSTEP 3 — Skipped (all subjects have molecular_subtype = unknown)")
 
     sc_m1 = step4a_dlm1_scenarios(X_all_ord, X_boot, estimator, boot_models, output_dir)
 
     sc_m2 = None
-    if dlm2_results is not None:
+    if dlm2_results is not None and mol_risk_by_subj:
         sc_m2 = step4b_dlm2_scenarios(
-            X_all_ord, estimator, mol_risk_raw,
+            X_all_ord, estimator, mol_risk_by_subj,
             fusion_est, scalers, boot_entries, dlm1_results, output_dir
         )
 

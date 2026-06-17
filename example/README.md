@@ -8,7 +8,7 @@ This folder contains synthetic example files showing the exact format required b
 
 ### `Clinical_Features.xlsx`
 
-Three synthetic subjects demonstrating the 8 required columns and the range of valid values:
+Three synthetic subjects demonstrating the 9 required columns and the range of valid values:
 
 | Column | SUBJ001 | SUBJ002 | SUBJ003 |
 |--------|---------|---------|---------|
@@ -20,6 +20,9 @@ Three synthetic subjects demonstrating the 8 required columns and the range of v
 | extent_of_tumor_resection | Gross/Near total resection | Biopsy only | Partial resection |
 | chemotherapy | No | Yes | Yes |
 | radiation | No | No | No |
+| molecular_subtype | KIAA1549_BRAF | BRAF_V600E | NF1 |
+
+The `molecular_subtype` column is read per-subject, so different subjects can have different subtypes in the same run. Leave a cell blank or write `unknown` to skip DL-M2 for that subject only.
 
 Replace these rows with your own subjects. Each row = one patient.
 
