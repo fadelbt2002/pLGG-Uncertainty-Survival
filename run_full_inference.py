@@ -1,50 +1,71 @@
 #!/usr/bin/env python3
 """
-run_full_inference.py — Full pLGG Risk Inference Pipeline
-==========================================================
-Given a T2w MRI volume and clinical information for one or more new subjects,
-this script produces a complete risk report in four steps:
+run_full_inference.py — Full pLGG Risk Inference Pipeline with 95% Bootstrap CIs
+==================================================================================
+End-to-end inference for new subjects: T2w MRI → clinical risk report.
 
-  Step 1 — ResNet feature extraction
-             T2w NIfTI  →  layer3 GAP+GMP features (512-dim)
+Steps
+-----
+  1  ResNet feature extraction
+       T2w NIfTI folder → layer3 GAP+GMP features (512-dim)
 
-  Step 2 — DL-M1 risk score and group
-             Clinical + ResNet features  →  penalized Cox model
-             Output: Risk Score, Risk Group (High / Low)
+  2  DL-M1 risk score + 95% CI
+       Clinical + ResNet features → penalized Cox model
+       Risk Score, Risk Group (High/Low), CI from 1000 bootstrap resamples
 
-  Step 3 — DL-M2 risk score and group  [requires --mol_subtype]
-             DL-M1 score + Molecular subtype score  →  late-fusion Cox model
-             Output: Fusion Risk Score, Fusion Risk Group (High / Low)
+  3  DL-M2 risk score + 95% CI  [requires --mol_subtype]
+       DL-M1 score + molecular subtype → late-fusion CoxPH
+       Fusion Risk Score, Fusion Risk Group, CI from 1000 bootstrap entries
 
-  Step 4 — Treatment scenario simulations
-             4 resection × chemotherapy combinations  →  survival curves + table
+  4a DL-M1 treatment scenarios + 95% CI
+       4 resection × chemo combinations → survival curves with CI bands
+
+  4b DL-M2 treatment scenarios + 95% CI  [requires --mol_subtype]
+       Same 4 scenarios propagated through the fusion model
+
+Clinical_Features.xlsx format (8 columns only)
+------------------------------------------------
+  SubjectID                   — must match NIfTI filename prefix
+  legal_sex                   — Female | Male
+  age_at_event_days           — integer (days at imaging)
+  consolidated_tumor_locations— Cerebellar | Lobar | Suprasellar | Brain Stem |
+                                Multi regional | Intra Ventricular | Thalamus |
+                                Basal Ganglia | Other
+  cancer_predisposition       — None documented |
+                                Neurofibromatosis, Type 1 (NF-1)
+  extent_of_tumor_resection   — Biopsy only | Partial resection |
+                                Gross/Near total resection | Not Applicable
+  chemotherapy                — Yes | No | Not Applicable
+  radiation                   — Yes | No | Not Applicable
 
 Usage
 -----
-    python run_full_inference.py \\
-        --image_dir     /path/to/T2w_nifti_files \\
-        --clinical_xlsx /path/to/Clinical_Features.xlsx \\
-        --mol_subtype   KIAA1549_BRAF \\
-        --output_dir    /path/to/report
+  python run_full_inference.py \\
+      --image_dir     /path/to/T2w_nifti_files \\
+      --clinical_xlsx /path/to/Clinical_Features.xlsx \\
+      --mol_subtype   KIAA1549_BRAF \\
+      --output_dir    results/report
 
-    # Skip DL-M2 (molecular subtype unknown):
-    python run_full_inference.py \\
-        --image_dir     /path/to/T2w_nifti_files \\
-        --clinical_xlsx /path/to/Clinical_Features.xlsx \\
-        --mol_subtype   unknown \\
-        --output_dir    /path/to/report
+  # Without molecular subtype (Steps 1, 2, 4a only):
+  python run_full_inference.py \\
+      --image_dir     /path/to/T2w_nifti_files \\
+      --clinical_xlsx /path/to/Clinical_Features.xlsx \\
+      --mol_subtype   unknown \\
+      --output_dir    results/report
 
-Molecular subtype choices (--mol_subtype):
-    KIAA1549_BRAF   BRAF_V600E   NF1   FGFR   RTK
-    IDH   MYB   other_MAPK   wildtype   unknown
+Molecular subtype choices:
+  KIAA1549_BRAF  BRAF_V600E  NF1  FGFR  RTK  IDH  MYB  other_MAPK  wildtype  unknown
 
-Outputs written to --output_dir:
-    ResNet_Features.xlsx          — extracted imaging features
-    DLM1_risk_results.csv         — DL-M1 risk scores and groups
-    DLM2_risk_results.csv         — DL-M2 fusion risk scores/groups (if mol_subtype given)
-    treatment_scenarios.csv       — predicted 1/3/5-yr PFS per scenario
-    treatment_scenarios.png       — survival curve plot per scenario
-    full_report.csv               — all results combined in one table
+Outputs
+-------
+  ResNet_Features.xlsx            extracted imaging features
+  DLM1_risk_results.csv           DL-M1 risk score + 95% CI + group
+  DLM2_risk_results.csv           DL-M2 fusion risk score + 95% CI + group
+  DLM1_treatment_scenarios.csv    4 scenarios × 3 time-points (point + CI)
+  DLM2_treatment_scenarios.csv    same for DL-M2
+  <SubjectID>_DLM1_scenarios.png  survival curves with CI bands (DL-M1)
+  <SubjectID>_DLM2_scenarios.png  survival curves with CI bands (DL-M2)
+  full_report.csv                 all results in one table
 """
 
 import os
@@ -76,7 +97,6 @@ DLM1_DIR  = REPO_ROOT / "01_DLM1_Clinico_ResNet"
 MOL_DIR   = REPO_ROOT / "02_Molecular_Subtype"
 DLM2_DIR  = REPO_ROOT / "03_Late_Fusion_DLM2" / "final_model"
 
-# Add segmentation and DLM1 dirs to path so their modules are importable
 sys.path.insert(0, str(SEG_DIR))
 sys.path.insert(0, str(DLM1_DIR))
 
@@ -99,8 +119,7 @@ MOL_SUBTYPE_MAP = {
 }
 
 # ── Treatment scenarios ────────────────────────────────────────────────────────
-# resection values are on the /3 scale used by DL-M1's engineer_clinical()
-# (EXTENT_NORMALIZER=3 → biopsy=1/3, partial=2/3, GTR=3/3=1.0)
+# resection values are in the /3 scale used by engineer_clinical (EXTENT_NORMALIZER=3)
 TREATMENT_SCENARIOS = [
     {"label": "Biopsy only + Chemo: Yes",               "resection": 1/3, "chemo": 1, "color": "#377eb8", "ls": "-"},
     {"label": "Partial resection + Chemo: No",           "resection": 2/3, "chemo": 0, "color": "#4daf4a", "ls": "--"},
@@ -110,6 +129,7 @@ TREATMENT_SCENARIOS = [
 
 SURV_TIME_POINTS = [12, 36, 60]
 SURV_LABELS      = ["1-yr PFS", "3-yr PFS", "5-yr PFS"]
+CI_ALPHA         = 0.15  # fill_between transparency for CI bands
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,9 +146,21 @@ def _subject_id_from_filename(path: Path) -> str:
     return m.group(1) if m else stem.split("_")[0]
 
 
-def _load_pkl(path, label):
+def _load_pkl(path):
     with open(path, "rb") as f:
         return pickle.load(f)
+
+
+def _eval_surv(surv_fn, t: float) -> float:
+    if hasattr(surv_fn, "x") and len(surv_fn.x) > 0:
+        t = np.clip(t, surv_fn.x[0], surv_fn.x[-1])
+    return float(surv_fn(t))
+
+
+def _surv_curve(model, x_row, time_points):
+    """Survival curve for one subject from one model."""
+    surv_fn = model.predict_survival_function([x_row])[0]
+    return np.array([_eval_surv(surv_fn, t) for t in time_points])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -161,48 +193,42 @@ class _NIfTIDataset(Dataset):
 
 
 def _load_seg_backbone(model_path: str, device: torch.device) -> nn.Module:
-    """Load the fine-tuned ResNet34; returns the unwrapped backbone (no DataParallel)."""
     opt = types.SimpleNamespace(
         model="resnet", model_depth=34,
         input_W=128, input_H=128, input_D=128,
-        resnet_shortcut="B",
-        no_cuda=(device.type == "cpu"),
-        n_seg_classes=2, gpu_id=[0],
-        phase="test", pretrain_path=None,
-        new_layer_names=["conv_seg"],
+        resnet_shortcut="B", no_cuda=(device.type == "cpu"),
+        n_seg_classes=2, gpu_id=[0], phase="test",
+        pretrain_path=None, new_layer_names=["conv_seg"],
     )
     net, _ = seg_model_utils.generate_model(opt)
-    ckpt = torch.load(model_path, map_location=device)
-    sd   = ckpt.get("model_state_dict", ckpt)
-    sd   = {k.replace("module.", ""): v for k, v in sd.items()}
-    # generate_model wraps in DataParallel only when CUDA is used
-    inner = net.module if isinstance(net, nn.DataParallel) else net
+    ckpt   = torch.load(model_path, map_location=device)
+    sd     = ckpt.get("model_state_dict", ckpt)
+    sd     = {k.replace("module.", ""): v for k, v in sd.items()}
+    inner  = net.module if isinstance(net, nn.DataParallel) else net
     inner.load_state_dict(sd, strict=True)
     return inner
 
 
 def step1_extract_features(image_dir: str, model_path: str,
                             output_dir: Path, device: torch.device) -> pd.DataFrame:
-    print("\n" + "=" * 60)
-    print("STEP 1 — ResNet Feature Extraction (layer3 GAP+GMP)")
-    print("=" * 60)
+    print("\n" + "=" * 65)
+    print("STEP 1 — ResNet Feature Extraction (layer3 GAP+GMP, 512-dim)")
+    print("=" * 65)
 
     if not model_path:
         model_path = str(SEG_DIR / "final_model" / "final_model.pth")
     if not os.path.exists(model_path):
         raise FileNotFoundError(
             f"Segmentation model not found: {model_path}\n"
-            "Run:  git lfs pull   (to download final_model.pth)"
+            "Run:  git lfs pull"
         )
 
-    dataset = _NIfTIDataset(image_dir)
-    loader  = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0)
-
-    print(f"  Found {len(dataset)} subject(s) in {image_dir}")
+    dataset  = _NIfTIDataset(image_dir)
+    loader   = DataLoader(dataset, batch_size=2, shuffle=False, num_workers=0)
     backbone = _load_seg_backbone(model_path, device)
     backbone.to(device)
     backbone.eval()
-    print("  Segmentation backbone loaded ✓")
+    print(f"  {len(dataset)} subject(s) | device: {device}")
 
     collected, all_idx, captured = [], [], {}
 
@@ -214,9 +240,9 @@ def step1_extract_features(image_dir: str, model_path: str,
         with torch.no_grad():
             for vols, idx in loader:
                 backbone(vols.to(device))
-                feat = captured["layer3"]                # (B, 256, D, H, W)
-                gap  = feat.mean(dim=[2, 3, 4]).numpy()  # (B, 256)
-                gmp  = feat.amax(dim=[2, 3, 4]).numpy()  # (B, 256)
+                feat = captured["layer3"]
+                gap  = feat.mean(dim=[2, 3, 4]).numpy()
+                gmp  = feat.amax(dim=[2, 3, 4]).numpy()
                 collected.append(np.concatenate([gap, gmp], axis=1))
                 all_idx.extend(idx.tolist())
     finally:
@@ -224,59 +250,62 @@ def step1_extract_features(image_dir: str, model_path: str,
 
     features    = np.concatenate(collected, axis=0)
     subject_ids = [dataset.subject_id(i) for i in all_idx]
-    feat_cols   = [f"feature_{i:03d}" for i in range(features.shape[1])]
-    df = pd.DataFrame(features, columns=feat_cols)
+    df = pd.DataFrame(features, columns=[f"feature_{i:03d}" for i in range(features.shape[1])])
     df.insert(0, "SubjectID", subject_ids)
-
-    out_path = output_dir / "ResNet_Features.xlsx"
-    df.to_excel(str(out_path), index=False)
-    print(f"  Extracted {features.shape[1]} features for {len(df)} subject(s)")
-    print(f"  Saved → {out_path}")
+    df.to_excel(str(output_dir / "ResNet_Features.xlsx"), index=False)
+    print(f"  Extracted {features.shape[1]} features for {len(df)} subject(s) ✓")
     return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 2: DL-M1 risk score  +  return X_all for reuse in step 4
+# STEP 2: DL-M1 risk score + 95% bootstrap CI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def step2_dlm1(clinical_xlsx: str, output_dir: Path):
-    """
-    Returns (results_df, X_all_df, estimator, median_threshold).
-    X_all_df is the fully engineered feature matrix used by DL-M1.
-    """
-    print("\n" + "=" * 60)
-    print("STEP 2 — DL-M1 Risk Score (Clinical-ResNet Cox Model)")
-    print("=" * 60)
-
+def _build_dlm1_cfg(clinical_xlsx: str, output_dir: Path) -> dict:
     clin_fname = os.path.basename(clinical_xlsx)
     dest       = output_dir / clin_fname
     if str(Path(clinical_xlsx).resolve()) != str(dest.resolve()):
         shutil.copy(clinical_xlsx, dest)
 
-    output_dir = output_dir.resolve()   # must be absolute for _resolve() in inference.py
     cfg = dict(dlm1_inference.CONFIG)
     cfg.update({
-        "input_dir":     str(output_dir),
+        "input_dir":     str(output_dir.resolve()),
         "artifact_dir":  str(DLM1_DIR),
         "model_dir":     str(DLM1_DIR / "outputs" / "models"),
         "threshold_dir": str(DLM1_DIR / "outputs" / "models"),
-        "output_dir":    str(output_dir),
+        "output_dir":    str(output_dir.resolve()),
         "clinical_xlsx": clin_fname,
         "resnet_xlsx":   "ResNet_Features.xlsx",
         "output_csv":    "DLM1_risk_results.csv",
     })
+    return cfg
 
+
+def step2_dlm1(clinical_xlsx: str, output_dir: Path):
+    """
+    Returns (results_df, X_all_df, estimator, bootstrap_models, median_threshold).
+    """
+    print("\n" + "=" * 65)
+    print("STEP 2 — DL-M1 Risk Score + 95% Bootstrap CI")
+    print("=" * 65)
+
+    cfg   = _build_dlm1_cfg(clinical_xlsx, output_dir)
     paths = dlm1_inference.build_paths(cfg)
 
-    encoder         = _load_pkl(paths["encoder_pkl"],         "encoder")
-    scaler_clinical = _load_pkl(paths["scaler_clinical_pkl"], "scaler_clinical")
-    imputer         = _load_pkl(paths["imputer_pkl"],         "imputer")
-    scaler_radiomic = _load_pkl(paths["scaler_radiomic_pkl"], "scaler_radiomic")
-    remover         = _load_pkl(paths["remover_pkl"],         "remover")
-    dropper         = _load_pkl(paths["dropper_pkl"],         "dropper")
-    estimator       = _load_pkl(paths["estimator_pkl"],       "estimator")
-    thr_obj         = _load_pkl(paths["risk_threshold_pkl"],  "threshold")
+    encoder         = _load_pkl(paths["encoder_pkl"])
+    scaler_clinical = _load_pkl(paths["scaler_clinical_pkl"])
+    imputer         = _load_pkl(paths["imputer_pkl"])
+    scaler_radiomic = _load_pkl(paths["scaler_radiomic_pkl"])
+    remover         = _load_pkl(paths["remover_pkl"])
+    dropper         = _load_pkl(paths["dropper_pkl"])
+    estimator       = _load_pkl(paths["estimator_pkl"])
+    thr_obj         = _load_pkl(paths["risk_threshold_pkl"])
     median_threshold = thr_obj["median_threshold"] if isinstance(thr_obj, dict) else float(thr_obj)
+
+    # Load 1000 bootstrap CoxPH models for CI
+    boot_path = DLM1_DIR / "outputs" / "models" / "bootstrap_models.pkl"
+    bootstrap_models = _load_pkl(boot_path)
+    print(f"  Loaded {len(bootstrap_models)} bootstrap models for 95% CI")
 
     clin_raw   = dlm1_inference.wrangle_clinical(paths["clinical_xlsx"])
     resnet_raw = dlm1_inference.wrangle_resnet(paths["resnet_xlsx"], set(clin_raw.index))
@@ -287,17 +316,48 @@ def step2_dlm1(clinical_xlsx: str, output_dir: Path):
     if X_all.empty:
         raise RuntimeError("No subjects after merging clinical + ResNet features — check SubjectID alignment.")
 
-    results = dlm1_inference.predict_risk(X_all, estimator, median_threshold)
+    # Main estimator uses all engineered features (Coxnet, 158 features)
+    feat_names = getattr(estimator, "feature_names_in_", None)
+    if feat_names is not None:
+        X_all_ordered = X_all[list(feat_names)]
+    else:
+        X_all_ordered = X_all
+
+    # Bootstrap CoxPH models use the LASSO-selected feature subset (12 features)
+    boot_feat_names = list(bootstrap_models[0].feature_names_in_)
+    X_boot = X_all[boot_feat_names]
+
+    # Point estimates (main Coxnet model)
+    point_scores = estimator.predict(X_all_ordered)
+
+    # Bootstrap CI on risk score
+    boot_scores = np.array([
+        m.predict(X_boot) for m in bootstrap_models
+    ])  # (1000, N)
+
+    records = []
+    for i, subj in enumerate(X_all_ordered.index):
+        score = point_scores[i]
+        ci_lo = np.percentile(boot_scores[:, i], 2.5)
+        ci_hi = np.percentile(boot_scores[:, i], 97.5)
+        group = "High" if score > median_threshold else "Low"
+        records.append({
+            "Risk Score":    round(score, 4),
+            "CI Lower":      round(ci_lo, 4),
+            "CI Upper":      round(ci_hi, 4),
+            "Risk Group":    group,
+        })
+
+    results = pd.DataFrame(records, index=pd.Index(X_all_ordered.index, name="SubjectID"))
     results.to_csv(str(output_dir / "DLM1_risk_results.csv"), index=True)
 
     print(f"\n  DL-M1 results ({len(results)} subject(s)):")
     print(results.to_string())
-    print(f"\n  Saved → {output_dir / 'DLM1_risk_results.csv'}")
-    return results, X_all, estimator, median_threshold
+    return results, X_all, X_all_ordered, X_boot, estimator, bootstrap_models, median_threshold
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 3: DL-M2 risk score (late fusion)
+# STEP 3: DL-M2 risk score + 95% bootstrap CI
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_mol_features(subject_ids: list, mol_subtype_key: str) -> pd.DataFrame:
@@ -307,141 +367,285 @@ def _build_mol_features(subject_ids: list, mol_subtype_key: str) -> pd.DataFrame
     return df
 
 
-def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtype: str,
-               output_dir: Path) -> pd.DataFrame:
-    print("\n" + "=" * 60)
-    print("STEP 3 — DL-M2 Risk Score (Late Fusion + Molecular Subtype)")
-    print("=" * 60)
+def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtype: str, output_dir: Path):
+    """
+    Returns (results_df, mol_risk_raw, fusion_est, scalers, bootstrap_entries, threshold).
+    """
+    print("\n" + "=" * 65)
+    print("STEP 3 — DL-M2 Fusion Risk Score + 95% Bootstrap CI")
+    print("=" * 65)
 
-    mol_est    = _load_pkl(MOL_DIR / "outputs" / "models" / "estimator.pkl", "mol_estimator")
-    fusion_est = _load_pkl(DLM2_DIR / "model.pkl",   "fusion_estimator")
-    scalers    = _load_pkl(DLM2_DIR / "scalers.pkl", "scalers")
-    thr_line   = open(DLM2_DIR / "threshold.txt").read().split(":")[1].split("\n")[0].strip()
-    threshold  = float(thr_line)
+    mol_est    = _load_pkl(MOL_DIR / "outputs" / "models" / "estimator.pkl")
+    fusion_est = _load_pkl(DLM2_DIR / "model.pkl")
+    scalers    = _load_pkl(DLM2_DIR / "scalers.pkl")
+    threshold  = float(open(DLM2_DIR / "threshold.txt").read().split(":")[1].split("\n")[0].strip())
 
-    subject_ids   = dlm1_results.index.tolist()
-    X_mol         = _build_mol_features(subject_ids, mol_subtype)
-    mol_risk      = mol_est.predict(X_mol)
-    cr_risk       = dlm1_results["Risk Score"].values
+    boot_entries = _load_pkl(DLM2_DIR / "bootstrap_entries.pkl")
+    print(f"  Loaded {len(boot_entries)} bootstrap entries for 95% CI")
 
-    cr_scaled     = scalers["Clinical-ResNet"].transform(cr_risk.reshape(-1, 1)).flatten()
-    mol_scaled    = scalers["Molecular"].transform(mol_risk.reshape(-1, 1)).flatten()
-    fusion_scores = fusion_est.predict(np.column_stack([cr_scaled, mol_scaled]))
+    subject_ids = dlm1_results.index.tolist()
+    X_mol       = _build_mol_features(subject_ids, mol_subtype)
+    mol_risk    = mol_est.predict(X_mol)          # (N,) raw molecular risk scores
+    cr_risk     = dlm1_results["Risk Score"].values  # (N,) point estimates
 
-    df = pd.DataFrame({
-        "DLM1_Risk_Score":      cr_risk,
-        "Molecular_Risk_Score": mol_risk,
-        "DLM2_Risk_Score":      fusion_scores,
-        "DLM2_Risk_Group":      np.where(fusion_scores > threshold, "High", "Low"),
-    }, index=pd.Index(subject_ids, name="SubjectID"))
+    # Point estimates — use original discovery scalers
+    cr_scaled   = scalers["Clinical-ResNet"].transform(cr_risk.reshape(-1, 1)).flatten()
+    mol_scaled  = scalers["Molecular"].transform(mol_risk.reshape(-1, 1)).flatten()
+    fusion_pt   = fusion_est.predict(np.column_stack([cr_scaled, mol_scaled]))
 
+    # Bootstrap CI — each entry supplies its own (model, scaler_cr, scaler_mol)
+    boot_fusion = np.array([
+        entry["model"].predict(np.column_stack([
+            entry["scaler_cr"].transform(cr_risk.reshape(-1, 1)).flatten(),
+            entry["scaler_mol"].transform(mol_risk.reshape(-1, 1)).flatten(),
+        ]))
+        for entry in boot_entries
+    ])  # (1000, N)
+
+    records = []
+    for i, subj in enumerate(subject_ids):
+        score = fusion_pt[i]
+        ci_lo = np.percentile(boot_fusion[:, i], 2.5)
+        ci_hi = np.percentile(boot_fusion[:, i], 97.5)
+        records.append({
+            "DLM1_Risk_Score":      round(cr_risk[i], 4),
+            "Mol_Risk_Score":       round(mol_risk[i], 4),
+            "DLM2_Risk_Score":      round(score, 4),
+            "DLM2_CI_Lower":        round(ci_lo, 4),
+            "DLM2_CI_Upper":        round(ci_hi, 4),
+            "DLM2_Risk_Group":      "High" if score > threshold else "Low",
+        })
+
+    df = pd.DataFrame(records, index=pd.Index(subject_ids, name="SubjectID"))
     df.to_csv(str(output_dir / "DLM2_risk_results.csv"))
+
     print(f"  Molecular subtype : {mol_subtype}  →  {MOL_SUBTYPE_MAP[mol_subtype]}")
     print(f"  DL-M2 threshold   : {threshold:.6f}")
     print(f"\n  DL-M2 results ({len(df)} subject(s)):")
     print(df.to_string())
-    print(f"\n  Saved → {output_dir / 'DLM2_risk_results.csv'}")
+    return df, mol_risk, fusion_est, scalers, boot_entries, threshold
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 4a: DL-M1 treatment scenarios + 95% CI
+# ─────────────────────────────────────────────────────────────────────────────
+
+def step4a_dlm1_scenarios(X_all_ordered: pd.DataFrame, X_boot: pd.DataFrame,
+                           estimator, bootstrap_models: list,
+                           output_dir: Path) -> pd.DataFrame:
+    """
+    X_all_ordered — all 158 features ordered for the main Coxnet estimator (point estimate)
+    X_boot        — 12 LASSO-selected features for bootstrap CoxPH models (CI)
+    """
+    print("\n" + "=" * 65)
+    print("STEP 4a — DL-M1 Treatment Scenarios + 95% CI")
+    print("=" * 65)
+
+    time_points = np.arange(0, 61, 1)
+    boot_feat   = list(bootstrap_models[0].feature_names_in_)
+    rows = []
+
+    for subject_id in X_all_ordered.index:
+        x_full = X_all_ordered.loc[subject_id]   # 158 features, for point estimate
+        x_boot = X_boot.loc[subject_id]           # 12 features, for CI
+
+        fig, axes = plt.subplots(1, 4, figsize=(20, 5), sharey=True)
+        fig.suptitle(f"DL-M1 Treatment Scenarios — {subject_id}", fontweight="bold", fontsize=13)
+
+        for ax, sc in zip(axes, TREATMENT_SCENARIOS):
+            # Patch the treatment features in both feature sets
+            x_full_sc = x_full.copy()
+            x_full_sc["Extent of Tumor Resection"] = sc["resection"]
+            x_full_sc["Chemotherapy"]              = sc["chemo"]
+
+            x_boot_sc = x_boot.copy()
+            if "Extent of Tumor Resection" in boot_feat:
+                x_boot_sc["Extent of Tumor Resection"] = sc["resection"]
+            if "Chemotherapy" in boot_feat:
+                x_boot_sc["Chemotherapy"] = sc["chemo"]
+
+            # Point estimate from main Coxnet
+            pt_curve = _surv_curve(estimator, x_full_sc.values, time_points)
+
+            # Bootstrap CI from 1000 CoxPH models (12-feature subset)
+            boot_curves = np.array([
+                _surv_curve(m, x_boot_sc.values, time_points)
+                for m in bootstrap_models
+            ])
+            ci_lo = np.percentile(boot_curves, 2.5,  axis=0)
+            ci_hi = np.percentile(boot_curves, 97.5, axis=0)
+
+            pfs    = [float(pt_curve[t])                        for t in SURV_TIME_POINTS]
+            pfs_lo = [float(np.percentile(boot_curves[:, t], 2.5))  for t in SURV_TIME_POINTS]
+            pfs_hi = [float(np.percentile(boot_curves[:, t], 97.5)) for t in SURV_TIME_POINTS]
+
+            rows.append({
+                "SubjectID": subject_id,
+                "Model":     "DL-M1",
+                "Scenario":  sc["label"],
+                **{SURV_LABELS[i]: round(pfs[i], 3)    for i in range(3)},
+                **{f"{SURV_LABELS[i]}_CI": f"[{pfs_lo[i]:.3f}, {pfs_hi[i]:.3f}]" for i in range(3)},
+            })
+
+            ax.plot(time_points, pt_curve, color=sc["color"], lw=2)
+            ax.fill_between(time_points, ci_lo, ci_hi,
+                            color=sc["color"], alpha=CI_ALPHA, label="95% CI")
+            ax.set_title(sc["label"], fontsize=9, fontweight="bold")
+            ax.set_xlabel("Time (months)", fontsize=10)
+            ax.set_ylabel("PFS" if ax == axes[0] else "", fontsize=10)
+            ax.set_ylim(0, 1)
+            ax.grid(True, alpha=0.3)
+
+            for t_idx, t in enumerate(SURV_TIME_POINTS):
+                ax.annotate(f"{pfs[t_idx]:.2f}\n[{pfs_lo[t_idx]:.2f},{pfs_hi[t_idx]:.2f}]",
+                            xy=(t, pt_curve[t]),
+                            fontsize=6.5, ha="center", va="bottom",
+                            color=sc["color"])
+
+        plt.tight_layout()
+        fig.savefig(str(output_dir / f"{subject_id}_DLM1_scenarios.png"), dpi=200, bbox_inches="tight")
+        plt.close()
+        print(f"  {subject_id}: DL-M1 scenario plot saved")
+
+    df = pd.DataFrame(rows)
+    df.to_csv(str(output_dir / "DLM1_treatment_scenarios.csv"), index=False)
+    print(df.to_string(index=False))
     return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STEP 4: Treatment scenario simulations
+# STEP 4b: DL-M2 treatment scenarios + 95% CI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _eval_surv(surv_fn, t: float) -> float:
-    if hasattr(surv_fn, "x") and len(surv_fn.x) > 0:
-        t = np.clip(t, surv_fn.x[0], surv_fn.x[-1])
-    return float(surv_fn(t))
+def _dlm2_fusion_curve(entry_or_tuple, cr_raw, mol_raw, time_points):
+    """Predict survival curve from a fusion model given raw (unscaled) risk scores."""
+    if isinstance(entry_or_tuple, dict):
+        model     = entry_or_tuple["model"]
+        scaler_cr = entry_or_tuple["scaler_cr"]
+        scaler_mol= entry_or_tuple["scaler_mol"]
+    else:
+        model, scaler_cr, scaler_mol = entry_or_tuple
+
+    cr_sc  = scaler_cr.transform([[cr_raw]])[0][0]
+    mol_sc = scaler_mol.transform([[mol_raw]])[0][0]
+    surv_fn = model.predict_survival_function(np.array([[cr_sc, mol_sc]]))[0]
+    return np.array([_eval_surv(surv_fn, t) for t in time_points])
 
 
-def step4_treatment_scenarios(X_all: pd.DataFrame, estimator,
-                               output_dir: Path) -> pd.DataFrame:
-    print("\n" + "=" * 60)
-    print("STEP 4 — Treatment Scenario Simulations")
-    print("=" * 60)
+def step4b_dlm2_scenarios(X_all_ordered: pd.DataFrame,
+                           dlm1_estimator,
+                           mol_risk_raw: np.ndarray,
+                           fusion_est,
+                           scalers: dict,
+                           bootstrap_entries: list,
+                           dlm1_results: pd.DataFrame,
+                           output_dir: Path) -> pd.DataFrame:
+    print("\n" + "=" * 65)
+    print("STEP 4b — DL-M2 Treatment Scenarios + 95% CI")
+    print("=" * 65)
 
-    feat_names = getattr(estimator, "feature_names_in_", None)
-    if feat_names is not None:
-        missing = [c for c in feat_names if c not in X_all.columns]
-        if missing:
-            raise KeyError(f"X_all is missing columns the model expects: {missing}")
-        X_all = X_all[list(feat_names)]
+    # Wrap point-estimate fusion model as a pseudo-entry using discovery scalers
+    point_entry = {
+        "model":      fusion_est,
+        "scaler_cr":  scalers["Clinical-ResNet"],
+        "scaler_mol": scalers["Molecular"],
+    }
 
     time_points = np.arange(0, 61, 1)
-    n_subj = len(X_all)
-    ncols  = min(n_subj, 4)
-    nrows  = (n_subj + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows), squeeze=False)
-
     rows = []
-    for subj_i, (subject_id, x_row) in enumerate(X_all.iterrows()):
-        ax = axes[subj_i // ncols][subj_i % ncols]
-        ax.set_title(f"Subject: {subject_id}", fontweight="bold", fontsize=12)
+    subj_list = X_all_ordered.index.tolist()
 
-        for sc in TREATMENT_SCENARIOS:
+    for s_idx, subject_id in enumerate(subj_list):
+        x_row        = X_all_ordered.loc[subject_id]
+        mol_raw_subj = float(mol_risk_raw[s_idx])
+
+        fig, axes = plt.subplots(1, 4, figsize=(20, 5), sharey=True)
+        fig.suptitle(f"DL-M2 Treatment Scenarios — {subject_id}", fontweight="bold", fontsize=13)
+
+        for ax, sc in zip(axes, TREATMENT_SCENARIOS):
             x_sc = x_row.copy()
-            # Patch treatment features in the already-engineered feature space.
-            # engineer_clinical() divides raw extent by EXTENT_NORMALIZER=3, so
-            # scenario values 1/3, 2/3, 1.0 are already on the correct scale.
             x_sc["Extent of Tumor Resection"] = sc["resection"]
             x_sc["Chemotherapy"]              = sc["chemo"]
 
-            surv_fn = estimator.predict_survival_function([x_sc.values])[0]
-            curve   = np.array([_eval_surv(surv_fn, t) for t in time_points])
-            pfs     = [_eval_surv(surv_fn, t) for t in SURV_TIME_POINTS]
+            # DL-M1 risk score for this scenario (point estimate)
+            cr_raw_sc = float(dlm1_estimator.predict([x_sc.values])[0])
+
+            # Point estimate survival curve
+            pt_curve = _dlm2_fusion_curve(point_entry, cr_raw_sc, mol_raw_subj, time_points)
+
+            # Bootstrap CI — each entry re-scales cr_raw and mol_raw with its own scalers
+            boot_curves = np.array([
+                _dlm2_fusion_curve(entry, cr_raw_sc, mol_raw_subj, time_points)
+                for entry in bootstrap_entries
+            ])
+
+            ci_lo = np.percentile(boot_curves, 2.5,  axis=0)
+            ci_hi = np.percentile(boot_curves, 97.5, axis=0)
+
+            pfs    = [float(pt_curve[t])                        for t in SURV_TIME_POINTS]
+            pfs_lo = [float(np.percentile(boot_curves[:, t], 2.5))  for t in SURV_TIME_POINTS]
+            pfs_hi = [float(np.percentile(boot_curves[:, t], 97.5)) for t in SURV_TIME_POINTS]
 
             rows.append({
                 "SubjectID": subject_id,
+                "Model":     "DL-M2",
                 "Scenario":  sc["label"],
-                **{SURV_LABELS[i]: round(pfs[i], 3) for i in range(3)},
+                **{SURV_LABELS[i]: round(pfs[i], 3)    for i in range(3)},
+                **{f"{SURV_LABELS[i]}_CI": f"[{pfs_lo[i]:.3f}, {pfs_hi[i]:.3f}]" for i in range(3)},
             })
-            ax.plot(time_points, curve, label=sc["label"],
-                    color=sc["color"], linestyle=sc["ls"], linewidth=2)
 
-        ax.set_xlabel("Time (months)", fontsize=11)
-        ax.set_ylabel("Progression-Free Survival", fontsize=11)
-        ax.set_ylim(0, 1)
-        ax.legend(fontsize=8, loc="lower left")
-        ax.grid(True, alpha=0.3)
+            ax.plot(time_points, pt_curve, color=sc["color"], lw=2)
+            ax.fill_between(time_points, ci_lo, ci_hi,
+                            color=sc["color"], alpha=CI_ALPHA, label="95% CI")
+            ax.set_title(sc["label"], fontsize=9, fontweight="bold")
+            ax.set_xlabel("Time (months)", fontsize=10)
+            ax.set_ylabel("PFS" if ax == axes[0] else "", fontsize=10)
+            ax.set_ylim(0, 1)
+            ax.grid(True, alpha=0.3)
 
-    for i in range(n_subj, nrows * ncols):
-        axes[i // ncols][i % ncols].set_visible(False)
+            for t_idx, t in enumerate(SURV_TIME_POINTS):
+                ax.annotate(f"{pfs[t_idx]:.2f}\n[{pfs_lo[t_idx]:.2f},{pfs_hi[t_idx]:.2f}]",
+                            xy=(t, pt_curve[t]),
+                            fontsize=6.5, ha="center", va="bottom",
+                            color=sc["color"])
 
-    fig.suptitle("Treatment Scenario Simulations — DL-M1", fontweight="bold", fontsize=13)
-    plt.tight_layout()
-    plot_path = output_dir / "treatment_scenarios.png"
-    fig.savefig(str(plot_path), dpi=200, bbox_inches="tight")
-    plt.close()
+        plt.tight_layout()
+        fig.savefig(str(output_dir / f"{subject_id}_DLM2_scenarios.png"), dpi=200, bbox_inches="tight")
+        plt.close()
+        print(f"  {subject_id}: DL-M2 scenario plot saved")
 
-    df_scenarios = pd.DataFrame(rows)
-    df_scenarios.to_csv(str(output_dir / "treatment_scenarios.csv"), index=False)
-    print(df_scenarios.to_string(index=False))
-    print(f"\n  Saved → {output_dir / 'treatment_scenarios.csv'}")
-    print(f"  Saved → {plot_path}")
-    return df_scenarios
+    df = pd.DataFrame(rows)
+    df.to_csv(str(output_dir / "DLM2_treatment_scenarios.csv"), index=False)
+    print(df.to_string(index=False))
+    return df
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Combine all results
+# Combine all results into one summary table
 # ─────────────────────────────────────────────────────────────────────────────
 
 def combine_results(dlm1: pd.DataFrame, dlm2: pd.DataFrame | None,
-                    scenarios: pd.DataFrame, output_dir: Path) -> pd.DataFrame:
-    summary = dlm1[["Risk Score", "Risk Group"]].rename(
-        columns={"Risk Score": "DLM1_Risk_Score", "Risk Group": "DLM1_Risk_Group"}
-    )
+                    sc_m1: pd.DataFrame, sc_m2: pd.DataFrame | None,
+                    output_dir: Path) -> pd.DataFrame:
+    summary = dlm1.rename(columns={
+        "Risk Score": "DLM1_Score",
+        "CI Lower":   "DLM1_CI_Lo",
+        "CI Upper":   "DLM1_CI_Hi",
+        "Risk Group": "DLM1_Group",
+    })
     if dlm2 is not None:
-        summary = summary.join(dlm2[["DLM2_Risk_Score", "DLM2_Risk_Group"]])
+        summary = summary.join(dlm2[["DLM2_Risk_Score", "DLM2_CI_Lower", "DLM2_CI_Upper", "DLM2_Risk_Group"]])
 
-    best = scenarios[scenarios["Scenario"].str.contains("Gross")].set_index("SubjectID")
-    if not best.empty:
-        summary = summary.join(
-            best[SURV_LABELS].rename(columns={l: f"GTR_{l}" for l in SURV_LABELS}),
-            how="left",
-        )
+    # Best-case (GTR no chemo) PFS from each model
+    for model_label, sc_df in [("M1", sc_m1), ("M2", sc_m2)]:
+        if sc_df is None:
+            continue
+        best = sc_df[sc_df["Scenario"].str.contains("Gross")].set_index("SubjectID")
+        for lbl in SURV_LABELS:
+            summary[f"GTR_{model_label}_{lbl}"]    = best.get(lbl,    np.nan)
+            summary[f"GTR_{model_label}_{lbl}_CI"] = best.get(f"{lbl}_CI", "")
 
     summary.to_csv(str(output_dir / "full_report.csv"))
-    print(f"\n  Full report saved → {output_dir / 'full_report.csv'}")
     return summary
 
 
@@ -451,74 +655,66 @@ def combine_results(dlm1: pd.DataFrame, dlm2: pd.DataFrame | None,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Full pLGG Risk Inference: ResNet features → DL-M1 → DL-M2 → Treatment scenarios",
+        description="Full pLGG Risk Inference with 95% Bootstrap CI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Molecular subtype choices (--mol_subtype):
   KIAA1549_BRAF  BRAF_V600E  NF1  FGFR  RTK  IDH  MYB  other_MAPK  wildtype
-  unknown        (skips Step 3 / DL-M2)
+  unknown        (skips Steps 3 and 4b)
 
 Examples:
   python run_full_inference.py \\
-      --image_dir     /data/T2w_scans \\
-      --clinical_xlsx /data/Clinical_Features.xlsx \\
+      --image_dir     test_inference/T2w_scans \\
+      --clinical_xlsx test_inference/Clinical_Features.xlsx \\
       --mol_subtype   KIAA1549_BRAF \\
-      --output_dir    results/patient_report
-
-  python run_full_inference.py \\
-      --image_dir     /data/T2w_scans \\
-      --clinical_xlsx /data/Clinical_Features.xlsx \\
-      --mol_subtype   unknown \\
-      --output_dir    results/patient_report
+      --output_dir    test_inference/output
 """,
     )
-    parser.add_argument("--image_dir",     required=True,
-                        help="Folder of T2w NIfTI files (.nii.gz or .nii)")
-    parser.add_argument("--clinical_xlsx", required=True,
-                        help="Clinical_Features.xlsx (see 01_DLM1_Clinico_ResNet/LGG_inference/ for format)")
-    parser.add_argument("--mol_subtype",   required=True,
-                        choices=list(MOL_SUBTYPE_MAP.keys()),
-                        help="Molecular subtype for DL-M2; use 'unknown' to skip")
-    parser.add_argument("--output_dir",    default="inference_report",
-                        help="Output folder (default: inference_report/)")
+    parser.add_argument("--image_dir",     required=True)
+    parser.add_argument("--clinical_xlsx", required=True)
+    parser.add_argument("--mol_subtype",   required=True, choices=list(MOL_SUBTYPE_MAP.keys()))
+    parser.add_argument("--output_dir",    default="inference_report")
     parser.add_argument("--model_path",    default=None,
-                        help="Path to segmentation .pth (default: 05_Segmentation/final_model/final_model.pth)")
+                        help="Path to .pth (default: 05_Segmentation/final_model/final_model.pth)")
+    parser.add_argument("--skip_step1",    action="store_true",
+                        help="Skip feature extraction (ResNet_Features.xlsx already in output_dir)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 65)
     print("pLGG Full Risk Inference Pipeline")
-    print("=" * 60)
-    print(f"  Image dir        : {args.image_dir}")
-    print(f"  Clinical xlsx    : {args.clinical_xlsx}")
-    print(f"  Molecular subtype: {args.mol_subtype}")
-    print(f"  Output dir       : {output_dir}")
-    print(f"  Device           : {device}")
+    print("=" * 65)
 
-    step1_extract_features(args.image_dir, args.model_path, output_dir, device)
+    if not args.skip_step1:
+        step1_extract_features(args.image_dir, args.model_path, output_dir, device)
 
-    dlm1_results, X_all, estimator, _ = step2_dlm1(args.clinical_xlsx, output_dir)
+    dlm1_results, X_all, X_all_ord, X_boot, estimator, boot_models, thr = \
+        step2_dlm1(args.clinical_xlsx, output_dir)
 
-    dlm2_results = None
+    dlm2_results = mol_risk_raw = fusion_est = scalers = boot_entries = None
     if args.mol_subtype != "unknown":
-        dlm2_results = step3_dlm2(dlm1_results, args.mol_subtype, output_dir)
-    else:
-        print("\nSTEP 3 — Skipped (mol_subtype = unknown)")
+        dlm2_results, mol_risk_raw, fusion_est, scalers, boot_entries, _ = \
+            step3_dlm2(dlm1_results, args.mol_subtype, output_dir)
 
-    scenarios = step4_treatment_scenarios(X_all, estimator, output_dir)
+    sc_m1 = step4a_dlm1_scenarios(X_all_ord, X_boot, estimator, boot_models, output_dir)
 
-    print("\n" + "=" * 60)
+    sc_m2 = None
+    if dlm2_results is not None:
+        sc_m2 = step4b_dlm2_scenarios(
+            X_all_ord, estimator, mol_risk_raw,
+            fusion_est, scalers, boot_entries, dlm1_results, output_dir
+        )
+
+    print("\n" + "=" * 65)
     print("SUMMARY")
-    print("=" * 60)
-    summary = combine_results(dlm1_results, dlm2_results, scenarios, output_dir)
+    print("=" * 65)
+    summary = combine_results(dlm1_results, dlm2_results, sc_m1, sc_m2, output_dir)
     print(summary.to_string())
-
-    print("\n" + "=" * 60)
-    print(f"  All results saved to: {output_dir.resolve()}")
-    print("=" * 60)
+    print(f"\n  All results saved to: {output_dir.resolve()}")
+    print("=" * 65)
 
 
 if __name__ == "__main__":
