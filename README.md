@@ -38,28 +38,41 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 │   ├── imputer.pkl
 │   ├── remover.pkl
 │   ├── dropper.pkl
-│   └── outputs/                    # Trained model, metrics, plots
+│   ├── LGG_inference/              # Example input spreadsheets for inference
+│   └── outputs/                    # Trained model (estimator.pkl), metrics, plots
 │
 ├── 02_Molecular_Subtype/           # Molecular-only survival model
 │   ├── 1_Data_Wrangling.ipynb
 │   ├── 2_Feature_Engineering.ipynb
 │   ├── 3_Predictive_Modeling.ipynb
+│   ├── molecular_subtype_encoder.pkl
+│   ├── molecular_subtype_mapping.csv
 │   └── outputs/
 │
 ├── 03_Late_Fusion_DLM2/            # DL-M2: late fusion with molecular subtype
 │   └── Late_Fusion_Modeling_ResNet.py
 │
 ├── 04_Analysis/
-│   ├── uncertainty_analysis_DLM1_vs_DLM2.py    # Bootstrap CI comparison M1 vs M2
-│   ├── treatment_scenario_DLM1.py               # Treatment simulations (DL-M1)
-│   ├── treatment_scenario_DLM2.py               # Treatment simulations (DL-M2)
+│   ├── uncertainty_analysis_DLM1_vs_DLM2.py         # Bootstrap CI comparison M1 vs M2
+│   ├── treatment_scenario_DLM1.py                    # Treatment simulations (DL-M1)
+│   ├── treatment_scenario_DLM2.py                    # Treatment simulations (DL-M2)
 │   ├── statistical_comparison_radiomic_vs_resnet.py  # Radiomic vs DL-M1 comparison
-│   ├── risk_group_change.py                     # Patient reclassification M1→M2
-│   └── permutation_sanity_check.py              # Permutation test (reviewer validation)
+│   ├── risk_group_change.py                          # Patient reclassification M1→M2
+│   └── permutation_sanity_check.py                   # Permutation test (reviewer validation)
 │
 └── 05_Segmentation/
-    ├── train_segmentation.py       # Fine-tuning tumor segmentation on pBT cohort
-    └── test_segmentation.py        # Inference + feature extraction from T2w MRI
+    ├── train_segmentation.py   # Fine-tune ResNet34 segmentation on pBT cohort (n=752)
+    ├── test_segmentation.py    # Evaluate segmentation model (Dice score)
+    ├── extract_features.py     # Extract layer3/layer4 ResNet features from T2w MRI
+    ├── dataset.py              # CombinedSegmentationDataset (T2w, robust normalization)
+    ├── model.py                # generate_model() — ResNet34 segmentation head
+    ├── resnet_seg.py           # 3D ResNet backbone (resnet10 → resnet200)
+    ├── utils.py                # Logging, Dice coefficient helpers
+    └── final_model/            # Trained segmentation weights (Git LFS)
+        ├── final_model.pth     # ResNet34 fine-tuned on n=752 pediatric brain tumors
+        ├── config.json
+        ├── summary.json
+        └── evaluation/         # Test-set Dice scores and per-sample results
 ```
 
 ---
@@ -67,8 +80,8 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/<repo-name>.git
-cd <repo-name>
+git clone https://github.com/fadelbt2002/pLGG-Uncertainty-Survival.git
+cd pLGG-Uncertainty-Survival
 pip install -r requirements.txt
 ```
 
@@ -108,9 +121,33 @@ Input files required (see `LGG_inference/` for format):
 
 ## Segmentation and Feature Extraction
 
-The segmentation model was fine-tuned on a pediatric brain tumor cohort (n=752) using nnU-Net. ResNet features are extracted from the segmented tumor region on T2w MRI only.
+The segmentation model (ResNet34) was fine-tuned on a pediatric brain tumor cohort (n=752) using T2w MRI only. Trained weights are provided in `05_Segmentation/final_model/final_model.pth` (stored via Git LFS).
 
-See `05_Segmentation/` for training and inference scripts.
+**Step 1 — Extract features from your T2w MRI volumes:**
+
+```bash
+cd 05_Segmentation
+python extract_features.py \
+  --excel_path /path/to/LGG_Subject_Feature_Extraction.xlsx \
+  --model_path final_model/final_model.pth \
+  --image_dirs /path/to/T2w_images \
+  --output_dir /path/to/output_features
+```
+
+This produces CSV files with layer3 (256-dim) and layer4 (512-dim) GAP/GMP features per subject.
+
+**Step 2 — Use the extracted features as input to DL-M1:**
+
+Copy the output CSV into `ResNet_Features.xlsx` format (see `01_DLM1_Clinico_ResNet/LGG_inference/` for the expected column layout) and run `inference.py`.
+
+**To retrain the segmentation model** on your own cohort:
+
+```bash
+python train_segmentation.py \
+  --data_csv   /path/to/dataset.csv \
+  --output_dir /path/to/run_output \
+  --model_depth 34
+```
 
 ---
 

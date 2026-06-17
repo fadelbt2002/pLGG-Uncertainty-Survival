@@ -1,33 +1,52 @@
-# Patient data — never commit
+# ── Patient / subject-level data ─────────────────────────────────────────────
 X_clinical.pkl
 X_resnet.pkl
 X_molecular.pkl
 y.pkl
-*/data/
-data/
+**/X_clinical.pkl
+**/X_resnet.pkl
+**/X_molecular.pkl
+**/y.pkl
+**/data/*.pkl
+**/data/*.csv
+**/data/*.xlsx
+**/outputs/data/discovery_results.csv
+**/outputs/data/replicate_results.csv
+**/outputs/data/risk_scores*.csv
+**/outputs/data/survival_predictions*.csv
 
-# Intermediate model outputs with patient-level rows
-*discovery_results.pkl
-*replicate_results.pkl
-*discovery_results.csv
-*replicate_results.csv
-*risk_scores*.csv
+# ── Model weight checkpoints (large binaries) ─────────────────────────────────
+# final_model.pth is tracked via Git LFS — all others excluded.
+weight_checkpoint_*.pt
+**/weight_checkpoint_*.pt
+**/outputs_DeepSurv/
 
-# Python artifacts
+# ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
-.ipynb_checkpoints/
+*.egg-info/
+dist/
+build/
 
-# OS
+# ── Jupyter ──────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# ── Environment ──────────────────────────────────────────────────────────────
+.env
+.venv/
+venv/
+env/
+
+# ── OS ───────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Jupyter
-.jupyter/
+# ── Analysis runtime outputs (timestamped run folders) ───────────────────────
+04_Analysis/outputs/
+03_Late_Fusion_DLM2/outputs/
 
-# Conda / pip env
-*.egg-info/
-.env
-venv/
-env/
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
