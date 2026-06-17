@@ -143,7 +143,7 @@ class SegmentationFeatureExtractor(nn.Module):
             input_W=128, input_H=128, input_D=128,
             resnet_shortcut="B",
             no_cuda=(device.type == "cpu"),
-            n_seg_classes=2, gpu_id=[0],
+            n_seg_classes=1, gpu_id=[0],
             phase="test", pretrain_path=None,
             new_layer_names=["conv_seg"],
         )

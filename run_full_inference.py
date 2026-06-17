@@ -200,7 +200,7 @@ def _load_seg_backbone(model_path: str, device: torch.device) -> nn.Module:
         model="resnet", model_depth=34,
         input_W=128, input_H=128, input_D=128,
         resnet_shortcut="B", no_cuda=(device.type == "cpu"),
-        n_seg_classes=2, gpu_id=[0], phase="test",
+        n_seg_classes=1, gpu_id=[0], phase="test",
         pretrain_path=None, new_layer_names=["conv_seg"],
     )
     net, _ = seg_model_utils.generate_model(opt)
