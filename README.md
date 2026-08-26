@@ -45,7 +45,6 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 │   ├── imputer.pkl
 │   ├── remover.pkl
 │   ├── dropper.pkl
-│   ├── LGG_inference/              # Example Clinical_Features.xlsx and ResNet_Features.xlsx
 │   └── outputs/models/             # estimator.pkl, bootstrap_models.pkl (1000 × CoxPH), risk_threshold.pkl,
 │                                   # refit_coxph_model.pkl (CoxPH α=0, 12 features), refit_threshold.pkl
 │
@@ -64,8 +63,6 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 │       ├── model.pkl               # DL-M2 CoxPH fusion model
 │       ├── scalers.pkl             # Discovery-fit StandardScalers (CR and Molecular)
 │       ├── threshold.txt           # Median risk score threshold (discovery cohort)
-│       ├── fusion_weights.csv      # CR vs Molecular contribution weights
-│       ├── performance_summary.csv # C-indices for base and fusion models
 │       └── bootstrap_entries.pkl   # 1000 bootstrap entries (model + scaler_cr + scaler_mol)
 │
 ├── 04_Analysis/
@@ -88,8 +85,7 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
     └── final_model/            # Trained segmentation weights (Git LFS)
         ├── final_model.pth     # ResNet34 fine-tuned on n=752 pediatric brain tumors
         ├── config.json
-        ├── summary.json
-        └── evaluation/
+        └── summary.json
 ```
 
 ---
@@ -153,7 +149,7 @@ The file must be in `--output_dir` as `ResNet_Features.xlsx` with columns `Subje
 
 ### Input 3 — Clinical Features Spreadsheet
 
-Create an Excel file (`Clinical_Features.xlsx`) with **exactly these 8 columns** — no extras needed:
+Create an Excel file (`Clinical_Features.xlsx`) with **exactly these 9 columns** — no extras needed:
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -202,11 +198,11 @@ Unavailable
 
 **`chemotherapy`** and **`radiation`** — `Yes` or `No`
 
-**Example `Clinical_Features.xlsx`** (see `01_DLM1_Clinico_ResNet/LGG_inference/` for a ready-to-use template):
+**Example `Clinical_Features.xlsx`** (see `example/Clinical_Features.xlsx` for a ready-to-use template):
 
-| SubjectID | legal_sex | age_at_event_days | consolidated_tumor_locations | cancer_predisposition | extent_of_tumor_resection | chemotherapy | radiation |
-|-----------|-----------|------------------|------------------------------|-----------------------|--------------------------|--------------|-----------|
-| C1277724 | Male | 4762 | Cerebellar | None documented | Gross/Near total resection | No | No |
+| SubjectID | legal_sex | age_at_event_days | consolidated_tumor_locations | cancer_predisposition | extent_of_tumor_resection | chemotherapy | radiation | molecular_subtype |
+|-----------|-----------|------------------|------------------------------|-----------------------|--------------------------|--------------|-----------|-------------------|
+| C1277724 | Male | 4762 | Cerebellar | None documented | Gross/Near total resection | No | No | KIAA1549_BRAF |
 
 Multiple subjects can be listed as additional rows — the pipeline scores all of them in one run.
 
@@ -262,6 +258,17 @@ python run_full_inference.py \
 | 4b | DL-M2 treatment scenarios + CI bands | `DLM2_treatment_scenarios.csv`, `<ID>_DLM2_scenarios.png` |
 | — | Combined summary table | `full_report.csv` |
 
+**All command-line options:**
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--image_dir` | yes | Folder of skull-stripped, normalized T2w NIfTI files |
+| `--clinical_xlsx` | yes | Path to `Clinical_Features.xlsx` |
+| `--output_dir` | yes | Where results, plots, and CSVs are written |
+| `--mol_subtype` | no | Fallback subtype applied to all subjects when the spreadsheet has no `molecular_subtype` column |
+| `--skip_step1` | no | Skip feature extraction; reuse `ResNet_Features.xlsx` already in `--output_dir` |
+| `--model_path` | no | Segmentation weights (default: `05_Segmentation/final_model/final_model.pth`) |
+
 **Skip feature extraction** (if `ResNet_Features.xlsx` already exists in `--output_dir`):
 
 ```bash
@@ -295,6 +302,22 @@ python run_full_inference.py \
 
 CIs reflect **parameter/sampling uncertainty** from finite training-sample size, not individual outcome variability.
 
+### The molecular model (input to DL-M2)
+
+The molecular arm is a `CoxnetSurvivalAnalysis` over **14 features** — it is not
+molecular-subtype-only:
+
+| Group | Features |
+|-------|----------|
+| Clinical (5) | `Sex`, `Age at Diagnosis` (standardized), `Extent of Tumor Resection` (÷3), `Chemotherapy`, `Radiation` |
+| Molecular (9) | `mol_KIAA1549_BRAF`, `mol_BRAF_V600E`, `mol_NF1`, `mol_FGFR`, `mol_RTK`, `mol_IDH`, `mol_MYB`, `mol_other_MAPK`, `mol_CDKN2A_B` |
+
+Molecular alterations are **multi-hot**, not one-hot: a co-driver tumor fires
+every column it carries, and `wildtype` is the all-zeros reference. Age is
+standardized with `02_Molecular_Subtype/scaler_clinical.pkl`, fit on the
+molecular cohort — deliberately a different scaler from DL-M1's, which was fit
+on a different cohort and also scales Tumor Location.
+
 ---
 
 ## Step-by-Step Inference (Alternative)
@@ -315,7 +338,7 @@ python inference.py \
   --output-dir /path/to/results
 ```
 
-Place `Clinical_Features.xlsx` in the same `--input-dir`. See `LGG_inference/` for a ready-to-use template.
+Place `Clinical_Features.xlsx` in the same `--input-dir`. See `example/` for a ready-to-use template.
 
 ---
 
