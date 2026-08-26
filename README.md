@@ -1,6 +1,7 @@
-# Uncertainty-Aware Multimodal Survival Modeling in Pediatric Low-Grade Glioma
+# Uncertainty-Aware Risk Stratification in Pediatric Low-Grade Glioma Using Multimodal Data
 
-**Submitted to:** *American Journal of Neuroradiology (AJNR)*
+**Published in:** *American Journal of Neuroradiology (AJNR)*, July 29, 2026
+**DOI:** [10.3174/ajnr.A9550](https://doi.org/10.3174/ajnr.A9550) · [Article](https://www.ajnr.org/content/early/2026/07/29/ajnr.A9550)
 
 ---
 
@@ -324,7 +325,30 @@ Notebooks are numbered and should be run in order within each module:
 
 ## Citation
 
-> Batal F, et al. *Uncertainty-Aware Multimodal Survival Modeling in Pediatric Low-Grade Glioma.* AJNR, 2026. (under review)
+> Batal F, Vunnava B, Kraya A, Gandhi D, Familiar A, Rathi K, Varshochi S,
+> Chrysochoou D, Rezaei S, Farah O, Kollur A, Blatney A, Madsen P, Storm PB,
+> Resnick A, Vossough A, Nabavizadeh A, Fathi Kazerooni A.
+> **Uncertainty-Aware Risk Stratification in Pediatric Low-Grade Glioma Using
+> Multimodal Data.** *American Journal of Neuroradiology.* Published online
+> July 29, 2026. doi:[10.3174/ajnr.A9550](https://doi.org/10.3174/ajnr.A9550)
+
+```bibtex
+@article{Batal2026pLGG,
+  title   = {Uncertainty-Aware Risk Stratification in Pediatric Low-Grade
+             Glioma Using Multimodal Data},
+  author  = {Batal, Fadel and Vunnava, Bhavyasri and Kraya, Adam and
+             Gandhi, Deep and Familiar, Ariana and Rathi, Komal and
+             Varshochi, Sanaz and Chrysochoou, Dimosthenis and
+             Rezaei, Somaye and Farah, Ommay and Kollur, Anshul and
+             Blatney, August and Madsen, Peter and Storm, Phillip B. and
+             Resnick, Adam and Vossough, Arastoo and Nabavizadeh, Ali and
+             Fathi Kazerooni, Anahita},
+  journal = {American Journal of Neuroradiology},
+  year    = {2026},
+  month   = jul,
+  doi     = {10.3174/ajnr.A9550}
+}
+```
 
 ---
 
