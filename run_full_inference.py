@@ -107,19 +107,34 @@ import model as seg_model_utils
 import inference as dlm1_inference
 from dataset import CombinedSegmentationDataset
 
-# ── Molecular subtype → one-hot column ────────────────────────────────────────
-MOL_SUBTYPE_MAP = {
-    "KIAA1549_BRAF": "mol_group_KIAA1549_BRAF",
-    "BRAF_V600E":    "mol_group_BRAF_V600E",
-    "NF1":           "mol_group_NF1",
-    "FGFR":          "mol_group_FGFR",
-    "RTK":           "mol_group_RTK",
-    "IDH":           "mol_group_IDH",
-    "MYB":           "mol_group_MYB",
-    "other_MAPK":    "mol_group_other_MAPK",
-    "wildtype":      "mol_group_other",
+# ── Molecular subtype → multi-hot columns (mol_ prefix) ───────────────────────
+# Matches the encoding in 02_Molecular_Subtype/1_Data_Wrangling.ipynb.
+# Each alteration is an independent binary flag; co-driver tumors fire multiple.
+MOL_TOKEN_MAP = {
+    "KIAA1549_BRAF": "mol_KIAA1549_BRAF",
+    "BRAF_V600E":    "mol_BRAF_V600E",
+    "NF1":           "mol_NF1",
+    "FGFR":          "mol_FGFR",
+    "RTK":           "mol_RTK",
+    "IDH":           "mol_IDH",
+    "MYB":           "mol_MYB",
+    "other_MAPK":    "mol_other_MAPK",
+    "CDKN2A_B":      "mol_CDKN2A_B",
+    "wildtype":      None,   # all-zeros row; no column fires
     "unknown":       None,
 }
+MOL_ALTERATION_COLS = [
+    "mol_KIAA1549_BRAF", "mol_BRAF_V600E", "mol_NF1", "mol_FGFR",
+    "mol_RTK", "mol_IDH", "mol_MYB", "mol_other_MAPK", "mol_CDKN2A_B",
+]
+# Clinical columns expected by the molecular model (same encoding as DL-M1 except
+# no Tumor Location; Age scaled by 02_Molecular_Subtype/scaler_clinical.pkl).
+MOL_CLINICAL_COLS = [
+    "Sex", "Age at Diagnosis", "Extent of Tumor Resection", "Chemotherapy", "Radiation",
+]
+MOL_EXTENT_NORMALIZER = 3
+# All 14 features the molecular estimator expects (order must match training):
+MOL_FEATURE_COLS = MOL_CLINICAL_COLS + MOL_ALTERATION_COLS
 
 # ── Treatment scenarios ────────────────────────────────────────────────────────
 # resection values are in the /3 scale used by engineer_clinical (EXTENT_NORMALIZER=3)
@@ -318,7 +333,7 @@ def read_mol_subtypes(clinical_xlsx: str, cli_mol_subtype: str | None) -> dict:
         subj = str(row["SubjectID"])
         if has_col:
             val = str(row.get("molecular_subtype", "")).strip()
-            val = val if val in MOL_SUBTYPE_MAP else (cli_mol_subtype or "unknown")
+            val = val if val in MOL_TOKEN_MAP else (cli_mol_subtype or "unknown")
         else:
             val = cli_mol_subtype
         result[subj] = val
@@ -415,27 +430,74 @@ def step2_dlm1(clinical_xlsx: str, output_dir: Path):
 # STEP 3: DL-M2 risk score + 95% bootstrap CI
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_mol_features_row(mol_subtype_key: str) -> pd.DataFrame:
-    """One-hot encode a single molecular subtype into a (1, 9) DataFrame."""
-    all_cols = [v for v in MOL_SUBTYPE_MAP.values() if v is not None]
-    df = pd.DataFrame(0, index=[0], columns=all_cols)
-    df[MOL_SUBTYPE_MAP[mol_subtype_key]] = 1
-    return df
+def _build_mol_features_row(
+    mol_subtype_key: str,
+    clin_row: pd.Series,
+    mol_scaler,
+) -> pd.DataFrame:
+    """
+    Build the 14-feature input row for the molecular estimator:
+      [Sex, Age at Diagnosis (scaled), Extent of Tumor Resection (/3),
+       Chemotherapy, Radiation, mol_KIAA1549_BRAF, ..., mol_CDKN2A_B]
+
+    clin_row: the subject's raw clinical Series (same columns as Clinical_Features.xlsx
+              after label-encoding in engineer_clinical).
+    mol_scaler: sklearn StandardScaler fit on Age at Diagnosis (molecular cohort).
+    """
+    row = {}
+
+    # ── Clinical features (label-encoded, same as DL-M1 except no Tumor Location) ──
+    sex_raw = clin_row.get("legal_sex", clin_row.get("Sex", 0))
+    row["Sex"] = 1 if str(sex_raw).strip().lower() in ("male", "1") else 0
+
+    age_raw = float(clin_row.get("age_at_event_days", clin_row.get("Age at Diagnosis", 0)))
+    row["Age at Diagnosis"] = float(mol_scaler.transform([[age_raw]])[0][0])
+
+    resection_map = {
+        "not applicable": 0, "unavailable": 0,
+        "biopsy only": 1,
+        "partial resection": 2,
+        "gross/near total resection": 3,
+    }
+    res_raw = str(clin_row.get("extent_of_tumor_resection",
+                               clin_row.get("Extent of Tumor Resection", "unavailable"))).lower()
+    row["Extent of Tumor Resection"] = resection_map.get(res_raw, 0) / MOL_EXTENT_NORMALIZER
+
+    chemo_raw = str(clin_row.get("chemotherapy", clin_row.get("Chemotherapy", "No"))).lower()
+    row["Chemotherapy"] = 1 if chemo_raw in ("yes", "1") else 0
+
+    rad_raw = str(clin_row.get("radiation", clin_row.get("Radiation", "No"))).lower()
+    row["Radiation"] = 1 if rad_raw in ("yes", "1") else 0
+
+    # ── Multi-hot molecular alteration columns ─────────────────────────────────
+    for col in MOL_ALTERATION_COLS:
+        row[col] = 0
+    col = MOL_TOKEN_MAP.get(mol_subtype_key)
+    if col is not None:
+        row[col] = 1
+
+    return pd.DataFrame([row], columns=MOL_FEATURE_COLS)
 
 
-def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtypes: dict, output_dir: Path):
+def step3_dlm2(
+    dlm1_results: pd.DataFrame,
+    mol_subtypes: dict,
+    clin_df: pd.DataFrame,
+    output_dir: Path,
+):
     """
     mol_subtypes: {SubjectID: mol_subtype_key} — per-subject, from read_mol_subtypes().
+    clin_df: raw clinical DataFrame indexed by SubjectID (for clinical features).
     Subjects whose subtype is 'unknown' are skipped (no DL-M2 row produced).
 
     Returns (results_df, mol_risk_by_subj, fusion_est, scalers, bootstrap_entries, threshold).
-    mol_risk_by_subj: dict {SubjectID: float} of raw molecular risk scores (unknown subjects absent).
     """
     print("\n" + "=" * 65)
     print("STEP 3 — DL-M2 Fusion Risk Score + 95% Bootstrap CI")
     print("=" * 65)
 
     mol_est      = _load_pkl(MOL_DIR / "outputs" / "models" / "estimator.pkl")
+    mol_scaler   = _load_pkl(MOL_DIR / "scaler_clinical.pkl")
     fusion_est   = _load_pkl(DLM2_DIR / "model.pkl")
     scalers      = _load_pkl(DLM2_DIR / "scalers.pkl")
     threshold    = float(open(DLM2_DIR / "threshold.txt").read().split(":")[1].split("\n")[0].strip())
@@ -452,8 +514,9 @@ def step3_dlm2(dlm1_results: pd.DataFrame, mol_subtypes: dict, output_dir: Path)
             print(f"  {subj}: molecular_subtype = unknown — skipping DL-M2")
             continue
 
+        clin_row  = clin_df.loc[subj] if subj in clin_df.index else pd.Series(dtype=object)
         cr_risk   = float(dlm1_results.loc[subj, "Risk Score"])
-        X_mol_row = _build_mol_features_row(mol_key)
+        X_mol_row = _build_mol_features_row(mol_key, clin_row, mol_scaler)
         mol_risk  = float(mol_est.predict(X_mol_row)[0])
 
         # Point estimate
@@ -898,8 +961,9 @@ Examples:
     dlm2_results = mol_risk_by_subj = fusion_est = scalers = boot_entries = None
     dlm2_threshold = None
     if has_any_mol:
+        clin_df = pd.read_excel(args.clinical_xlsx).set_index("SubjectID")
         dlm2_results, mol_risk_by_subj, fusion_est, scalers, boot_entries, dlm2_threshold = \
-            step3_dlm2(dlm1_results, mol_subtypes, output_dir)
+            step3_dlm2(dlm1_results, mol_subtypes, clin_df, output_dir)
     else:
         print("\nSTEP 3 — Skipped (all subjects have molecular_subtype = unknown)")
 

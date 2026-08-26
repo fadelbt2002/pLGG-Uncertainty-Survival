@@ -48,13 +48,14 @@ Data were obtained from the [Children's Brain Tumor Network (CBTN)](https://cbtn
 │   └── outputs/models/             # estimator.pkl, bootstrap_models.pkl (1000 × CoxPH), risk_threshold.pkl,
 │                                   # refit_coxph_model.pkl (CoxPH α=0, 12 features), refit_threshold.pkl
 │
-├── 02_Molecular_Subtype/           # Molecular-only survival model
+├── 02_Molecular_Subtype/           # Molecular + clinical survival model
 │   ├── 1_Data_Wrangling.ipynb
 │   ├── 2_Feature_Engineering.ipynb
 │   ├── 3_Predictive_Modeling.ipynb
-│   ├── molecular_subtype_encoder.pkl
+│   ├── molecular_subtype_encoder.pkl  # multi-hot encoding spec (TOKEN_MAP + column order)
 │   ├── molecular_subtype_mapping.csv
-│   └── outputs/models/             # estimator.pkl (molecular CoxPH)
+│   ├── scaler_clinical.pkl            # StandardScaler for Age at Diagnosis (molecular cohort)
+│   └── outputs/models/             # estimator.pkl (CoxnetSurvivalAnalysis, 14 features)
 │
 ├── 03_Late_Fusion_DLM2/            # DL-M2: late fusion with molecular subtype
 │   ├── Late_Fusion_Modeling_ResNet.py
