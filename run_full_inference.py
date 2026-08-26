@@ -136,6 +136,14 @@ MOL_EXTENT_NORMALIZER = 3
 # All 14 features the molecular estimator expects (order must match training):
 MOL_FEATURE_COLS = MOL_CLINICAL_COLS + MOL_ALTERATION_COLS
 
+# Emit the age-column fallback warning once per run, not once per subject.
+_MOL_AGE_FALLBACK_WARNED = False
+
+
+def _set_mol_age_warned() -> None:
+    global _MOL_AGE_FALLBACK_WARNED
+    _MOL_AGE_FALLBACK_WARNED = True
+
 # ── Treatment scenarios ────────────────────────────────────────────────────────
 # resection values are in the /3 scale used by engineer_clinical (EXTENT_NORMALIZER=3)
 TREATMENT_SCENARIOS = [
@@ -470,8 +478,22 @@ def _build_mol_features_row(
     sex_raw = clin_row.get("legal_sex", clin_row.get("Sex", 0))
     row["Sex"] = 1 if str(sex_raw).strip().lower() in ("male", "1") else 0
 
-    age_raw = float(clin_row.get("age_at_event_days", clin_row.get("Age at Diagnosis", 0)))
-    row["Age at Diagnosis"] = float(mol_scaler.transform([[age_raw]])[0][0])
+    # The molecular model was trained on AGE AT DIAGNOSIS, whereas DL-M1 was
+    # trained on age at the imaging event. These differ for a minority of
+    # subjects (7% of our cohort, by up to ~12 years), and substituting one for
+    # the other can flip a patient's risk group. Prefer the dedicated column;
+    # fall back to age_at_event_days only if it is absent, with a warning.
+    age_raw = clin_row.get("age_at_diagnosis_days", None)
+    if age_raw is None or (isinstance(age_raw, float) and np.isnan(age_raw)):
+        age_raw = clin_row.get("age_at_event_days", clin_row.get("Age at Diagnosis", 0))
+        if not _MOL_AGE_FALLBACK_WARNED:
+            print("  [WARN] no 'age_at_diagnosis_days' column — falling back to "
+                  "'age_at_event_days' for the molecular model.\n"
+                  "         The molecular model was trained on age at DIAGNOSIS; if these "
+                  "differ for a subject,\n         their DL-M2 risk score (and possibly risk "
+                  "group) will be off. Add the column to fix.")
+            _set_mol_age_warned()
+    row["Age at Diagnosis"] = float(mol_scaler.transform([[float(age_raw)]])[0][0])
 
     resection_map = {
         "not applicable": 0, "unavailable": 0,

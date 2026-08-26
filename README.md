@@ -159,13 +159,23 @@ Create an Excel file (`Clinical_Features.xlsx`) with **exactly these 8 columns**
 |--------|------|-------------|
 | `SubjectID` | string | Must match the prefix parsed from the NIfTI filename (e.g. `C1234567`) |
 | `legal_sex` | string | `Female` or `Male` |
-| `age_at_event_days` | integer | Age at imaging in **days** (e.g. 3650 = ~10 years) |
+| `age_at_event_days` | integer | Age at **imaging** in days (e.g. 3650 = ~10 years). Used by DL-M1. |
+| `age_at_diagnosis_days` | integer | Age at **diagnosis** in days. Used by the molecular model (DL-M2). Optional — see note below. |
 | `consolidated_tumor_locations` | string | Tumor location — see valid values below |
 | `cancer_predisposition` | string | NF1 status — see valid values below |
 | `extent_of_tumor_resection` | string | Surgical extent — see valid values below |
 | `chemotherapy` | string | Chemotherapy received — see valid values below |
 | `radiation` | string | Radiation received — see valid values below |
 | `molecular_subtype` | string | Molecular driver — see valid values below. Leave blank or write `unknown` to skip DL-M2 for that subject. |
+
+> **Two age columns, on purpose.** DL-M1 was trained on age at the imaging
+> event; the molecular model (feeding DL-M2) was trained on age at diagnosis.
+> For patients imaged well after diagnosis these differ substantially — in our
+> cohort 7% of subjects differed, by up to ~12 years, and substituting one for
+> the other flipped a patient's DL-M2 risk group. Supply both columns whenever
+> you have them. If `age_at_diagnosis_days` is absent the pipeline falls back to
+> `age_at_event_days` and prints a warning; that is safe only when the two dates
+> coincide for every subject.
 
 **Valid values for each categorical column:**
 
