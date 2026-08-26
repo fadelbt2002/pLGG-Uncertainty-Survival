@@ -221,7 +221,13 @@ Valid values:
 | `MYB` | MYB/MYBL1 alteration |
 | `other_MAPK` | Other MAPK pathway |
 | `wildtype` | No known driver (wildtype / other) |
+| `CDKN2A_B` | CDKN2A/B co-deletion |
 | `unknown` | Molecular status unavailable — skips DL-M2 and runs DL-M1 only |
+
+**Co-driver tumors:** a subject carrying more than one alteration can list them
+comma-separated in the same cell — for example `KIAA1549_BRAF, CDKN2A_B`. Each
+recognised token fires its own binary feature (multi-hot encoding), matching how
+the model was trained. `wildtype` fires none and acts as the all-zeros reference.
 
 The `--mol_subtype` CLI flag is a fallback that applies the same subtype to all subjects when the column is absent from the spreadsheet. If molecular testing has not been performed, leave the `molecular_subtype` cell blank or write `unknown` — the pipeline will run Steps 1, 2, and 4a (DL-M1 only) for that subject.
 

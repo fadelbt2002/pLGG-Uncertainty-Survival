@@ -332,12 +332,32 @@ def read_mol_subtypes(clinical_xlsx: str, cli_mol_subtype: str | None) -> dict:
     for _, row in df.iterrows():
         subj = str(row["SubjectID"])
         if has_col:
-            val = str(row.get("molecular_subtype", "")).strip()
-            val = val if val in MOL_TOKEN_MAP else (cli_mol_subtype or "unknown")
+            val = _normalize_mol_value(str(row.get("molecular_subtype", "")).strip())
+            val = val if val is not None else (cli_mol_subtype or "unknown")
         else:
             val = cli_mol_subtype
         result[subj] = val
     return result
+
+
+def _normalize_mol_value(raw: str) -> str | None:
+    """
+    Validate a spreadsheet molecular_subtype cell.
+
+    Accepts a single key ('KIAA1549_BRAF') or a comma-separated list for
+    co-driver tumors ('KIAA1549_BRAF, CDKN2A_B'). Returns the cleaned string,
+    or None if no token is recognised.
+    """
+    if not raw or raw.lower() in ("nan", ""):
+        return None
+    toks = [t.strip() for t in raw.split(",") if t.strip()]
+    valid = [t for t in toks if t in MOL_TOKEN_MAP]
+    if not valid:
+        return None
+    unknown = [t for t in toks if t not in MOL_TOKEN_MAP]
+    if unknown:
+        print(f"  [WARN] unrecognised molecular token(s) ignored: {unknown}")
+    return ", ".join(valid)
 
 
 def step2_dlm1(clinical_xlsx: str, output_dir: Path):
@@ -470,11 +490,15 @@ def _build_mol_features_row(
     row["Radiation"] = 1 if rad_raw in ("yes", "1") else 0
 
     # ── Multi-hot molecular alteration columns ─────────────────────────────────
+    # mol_subtype_key may be a single key or a comma-separated list of co-drivers
+    # ("KIAA1549_BRAF, CDKN2A_B"). Every recognised token fires its own column;
+    # 'wildtype' fires none (all-zeros reference row).
     for col in MOL_ALTERATION_COLS:
         row[col] = 0
-    col = MOL_TOKEN_MAP.get(mol_subtype_key)
-    if col is not None:
-        row[col] = 1
+    for tok in str(mol_subtype_key).split(","):
+        col = MOL_TOKEN_MAP.get(tok.strip())
+        if col is not None:
+            row[col] = 1
 
     return pd.DataFrame([row], columns=MOL_FEATURE_COLS)
 
